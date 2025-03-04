@@ -17,20 +17,26 @@ Preprocess the Geometry3k dataset to parquet format
 
 import os
 import datasets
+from pathlib import Path
+import sys
+
+ROOT = str(Path(__file__).resolve().parents[2])
+sys.path.append(ROOT)
 
 from verl.utils.hdfs_io import copy, makedirs
 import argparse
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--local_dir', default='~/data/geo3k')
+    parser.add_argument('--local_dir', default=os.path.join(ROOT, 'datasets/geometry3k'))
     parser.add_argument('--hdfs_dir', default=None)
 
     args = parser.parse_args()
 
-    data_source = 'hiyouga/geometry3k'
+    data_path = os.path.join(ROOT, 'hub/geometry3k')
+    data_source = "hiyouga/geometry3k"
 
-    dataset = datasets.load_dataset(data_source)
+    dataset = datasets.load_dataset(data_path)
 
     train_dataset = dataset['train']
     test_dataset = dataset['test']
