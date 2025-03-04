@@ -12,23 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from importlib.metadata import version, PackageNotFoundError
+import re
+from mathruler.grader import extract_boxed_content, grade_answer
 
 
-def get_version(pkg):
-    try:
-        return version(pkg)
-    except PackageNotFoundError:
-        return None
+def format_reward(predict_str: str) -> float:
+    pattern = re.compile(r'<think>.*</think>.*', re.DOTALL)
+    match_result = re.fullmatch(pattern, predict_str)
+    return 1.0 if match_result else 0.0
 
 
-package_name = 'vllm'
-package_version = get_version(package_name)
+def acc_reward(predict_str: str, ground_truth: str) -> float:
+    answer = extract_boxed_content(predict_str)
+    return 1.0 if grade_answer(answer, ground_truth) else 0.0
 
-if package_version <= '0.6.3':
-    vllm_mode = 'customized'
-    from .vllm_rollout import vLLMRollout
-    from .fire_vllm_rollout import FIREvLLMRollout
-else:
-    vllm_mode = 'spmd'
-    from .vllm_rollout_spmd import vLLMRollout
+
+def compute_score(predict_str: str, ground_truth: str) -> float:
+    return 0.9 * acc_reward(predict_str, ground_truth) + 0.1 * format_reward(predict_str)
