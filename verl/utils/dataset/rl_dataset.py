@@ -202,6 +202,7 @@ class RLHFDataset(Dataset):
             )  # (3, seq_len)
         else:
             position_ids = compute_position_id_with_mask(attention_mask)
+            position_ids = position_ids.unsqueeze(0).expand(3, -1) # (3, seq_len)
 
         row_dict['input_ids'] = input_ids[0]
         row_dict['attention_mask'] = attention_mask[0]

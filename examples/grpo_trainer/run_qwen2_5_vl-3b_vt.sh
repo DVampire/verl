@@ -8,10 +8,18 @@ export WANDB_API_KEY=4025943f5c98398d235eae04243f882b45bcd591
 
 python3 ${HOME}/../evaluation-kit/gpu_idle.py &
 
+mm_train_path=$HOME/datasets/geometry3k/train.parquet
+mm_test_path=$HOME/datasets/geometry3k/test.parquet
+gsm8k_train_path=$HOME/datasets/gsm8k/train.parquet
+gsm8k_test_path=$HOME/datasets/gsm8k/test.parquet
+
+train_files="['$mm_train_path', '$gsm8k_train_path']"
+test_files="['$mm_test_path', '$gsm8k_test_path']"
+
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files=$HOME/datasets/geometry3k/train.parquet \
-    data.val_files=$HOME/datasets/geometry3k/test.parquet \
+    data.train_files="$train_files" \
+    data.val_files="$test_files" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
@@ -40,7 +48,7 @@ python3 -m verl.trainer.main_ppo \
     algorithm.kl_ctrl.kl_coef=0.001 \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
-    trainer.project_name='verl_grpo_example_geo3k' \
+    trainer.project_name='verl_grpo_example_geo3k_vision_text' \
     trainer.experiment_name='qwen2_5_vl_7b_function_rm' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \

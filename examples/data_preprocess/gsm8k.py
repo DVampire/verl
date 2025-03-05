@@ -18,6 +18,12 @@ Preprocess the GSM8k dataset to parquet format
 import re
 import os
 import datasets
+from pathlib import Path
+import sys
+
+
+ROOT = str(Path(__file__).resolve().parents[2])
+sys.path.append(ROOT)
 
 from verl.utils.hdfs_io import copy, makedirs
 import argparse
@@ -33,11 +39,12 @@ def extract_solution(solution_str):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--local_dir', default='~/data/gsm8k')
+    parser.add_argument('--local_dir', default=os.path.join(ROOT, 'datasets/gsm8k'))
     parser.add_argument('--hdfs_dir', default=None)
 
     args = parser.parse_args()
 
+    data_path = os.path.join(ROOT, 'hub/gsm8k')
     data_source = 'openai/gsm8k'
 
     dataset = datasets.load_dataset(data_source, 'main')
