@@ -23,51 +23,64 @@ processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct")
 # max_pixels = 1280*28*28
 # processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-3B-Instruct", min_pixels=min_pixels, max_pixels=max_pixels)
 
-# messages = [
-#     {
-#         "role": "user",
-#         "content": [
-#             {
-#                 "type": "image",
-#                 "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
-#             },
-#             {"type": "text", "text": "Describe this image."},
-#         ],
-#     }
-# ]
-
-messages = [
+messages1 = [
     {
         "role": "user",
-        "content": "How are you?",
+        "content": [
+            {
+                "type": "image",
+                "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
+                "min_pixels": 50176,
+                "max_pixels": 50176,
+            },
+            {"type": "text", "text": "What are the common elements in the picture?"},
+        ],
     }
 ]
+messages2 = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Tell me a joke."},
+]
+messages3 = [
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "image",
+                "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
+                "min_pixels": 50176,
+                "max_pixels": 50176,
+            },
+            {"type": "text", "text": "What are the common elements in the picture?"},
+        ],
+    }
+]
+# Combine messages for batch processing
+messages = [messages1, messages2, messages3]
 
 # Preparation for inference
-text = processor.apply_chat_template(
-    messages, tokenize=False, add_generation_prompt=True
-)
+texts = [
+    processor.apply_chat_template(msg, tokenize=False, add_generation_prompt=True)
+    for msg in messages
+]
 image_inputs, video_inputs = process_vision_info(messages)
 inputs = processor(
-    text=[text],
+    text=texts,
     images=image_inputs,
     videos=video_inputs,
     padding=True,
     return_tensors="pt",
 )
 inputs = inputs.to("cuda")
-print(inputs.keys())
+for key, val in inputs.items():
+    print(key, val.shape)
 
-input_ids = inputs["input_ids"]
-attention_mask = inputs["attention_mask"]
-print(input_ids.shape, attention_mask.shape)
-
-# Inference: Generation of the output
+# Batch Inference
 generated_ids = model.generate(**inputs, max_new_tokens=128)
 generated_ids_trimmed = [
     out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
 ]
-output_text = processor.batch_decode(
+output_texts = processor.batch_decode(
     generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
 )
-print(output_text)
+print(output_texts)

@@ -13,13 +13,15 @@ mm_test_path=$HOME/datasets/geometry3k/test.parquet
 gsm8k_train_path=$HOME/datasets/gsm8k/train.parquet
 gsm8k_test_path=$HOME/datasets/gsm8k/test.parquet
 
-train_files="['$mm_train_path', '$gsm8k_train_path']"
-test_files="['$mm_test_path', '$gsm8k_test_path']"
+train_multimodal_parquet_files="['$mm_train_path']"
+train_text_parquet_files="['$gsm8k_train_path']"
+val_multimodal_parquet_files="['$mm_test_path']"
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files="$train_files" \
-    data.val_files="$test_files" \
+    data.train_multimodal_parquet_files="$train_multimodal_parquet_files" \
+    data.train_text_parquet_files="$train_text_parquet_files" \
+    data.val_multimodal_parquet_files="$val_multimodal_parquet_files" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
@@ -48,8 +50,8 @@ python3 -m verl.trainer.main_ppo \
     algorithm.kl_ctrl.kl_coef=0.001 \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
-    trainer.project_name='verl_grpo_example_geo3k_vision_text' \
-    trainer.experiment_name='qwen2_5_vl_7b_function_rm' \
+    trainer.project_name='verl_grpo_example_geo3k' \
+    trainer.experiment_name='qwen2_5_vl_3b_function_rm_vision_text' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \

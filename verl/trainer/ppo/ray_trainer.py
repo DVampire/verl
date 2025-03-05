@@ -37,8 +37,9 @@ from verl.trainer.ppo import core_algos
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
 from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn
-from torch.utils.data import RandomSampler, SequentialSampler
+from torch.utils.data import RandomSampler, SequentialSampler, SubsetRandomSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
+import random
 
 WorkerType = Type[Worker]
 
@@ -492,7 +493,7 @@ class RayPPOTrainer(object):
 
     def _create_dataloader(self):
         # TODO: we have to make sure the batch size is divisible by the dp size
-        self.train_dataset = RLHFDataset(parquet_files=self.config.data.train_files,
+        self.train_multimodal_dataset = RLHFDataset(parquet_files=self.config.data.train_multimodal_parquet_files,
                                          tokenizer=self.tokenizer,
                                          processor=self.processor,
                                          prompt_key=self.config.data.prompt_key,
@@ -501,22 +502,39 @@ class RayPPOTrainer(object):
                                          filter_prompts=True,
                                          return_raw_chat=self.config.data.get('return_raw_chat', False),
                                          truncation='error')
+        self.train_text_dataset = RLHFDataset(parquet_files=self.config.data.train_text_parquet_files,
+                                            tokenizer=self.tokenizer,
+                                            processor=self.processor,
+                                            prompt_key=self.config.data.prompt_key,
+                                            image_key=self.config.data.get('image_key', 'images'),
+                                            max_prompt_length=self.config.data.max_prompt_length,
+                                            filter_prompts=True,
+                                            return_raw_chat=self.config.data.get('return_raw_chat', False),
+                                            truncation='error')
+
+
         # use sampler for better ckpt resume
         if self.config.data.shuffle:
-            train_dataloader_generator = torch.Generator()
-            train_dataloader_generator.manual_seed(self.config.data.get('seed', 1))
-            sampler = RandomSampler(data_source=self.train_dataset, generator=train_dataloader_generator)
+            multimodal_sampler = RandomSampler(data_source=self.train_multimodal_dataset)
+            text_sampler = RandomSampler(data_source=self.train_text_dataset)
         else:
-            sampler = SequentialSampler(data_source=self.train_dataset)
+            multimodal_sampler = SequentialSampler(data_source=self.train_multimodal_dataset)
+            text_sampler = SequentialSampler(data_source=self.train_text_dataset)
 
-        self.train_dataloader = StatefulDataLoader(dataset=self.train_dataset,
+        self.train_multimodal_dataloader = StatefulDataLoader(dataset=self.train_multimodal_dataset,
+                                                         batch_size=self.config.data.train_batch_size,
+                                                         num_workers=8,
+                                                         drop_last=True,
+                                                         collate_fn=collate_fn,
+                                                         sampler=multimodal_sampler)
+        self.train_text_dataloader = StatefulDataLoader(dataset=self.train_text_dataset,
                                                    batch_size=self.config.data.train_batch_size,
                                                    num_workers=8,
                                                    drop_last=True,
                                                    collate_fn=collate_fn,
-                                                   sampler=sampler)
+                                                   sampler=text_sampler)
 
-        self.val_dataset = RLHFDataset(parquet_files=self.config.data.val_files,
+        self.val_dataset = RLHFDataset(parquet_files=self.config.data.val_multimodal_parquet_files,
                                        tokenizer=self.tokenizer,
                                        processor=self.processor,
                                        prompt_key=self.config.data.prompt_key,
@@ -525,25 +543,26 @@ class RayPPOTrainer(object):
                                        filter_prompts=True,
                                        return_raw_chat=self.config.data.get('return_raw_chat', False),
                                        truncation='error')
+
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
-            # Validation datasets are sent to inference engines as a whole batch,
-            # which will schedule the memory themselves.
             batch_size=len(self.val_dataset),
             num_workers=8,
             shuffle=False,
             drop_last=False,
             collate_fn=collate_fn)
 
-        assert len(self.train_dataloader) >= 1
+        data_length = len(self.train_multimodal_dataloader) + len(self.train_text_dataloader)
+
+        assert data_length >= 1
         assert len(
             self.val_dataloader
         ) == 1, "Validation dataloader must have a single batch, which inference engines will schedule the memory themselves."
 
-        print(f'Size of train dataloader: {len(self.train_dataloader)}')
+        print(f'Size of train dataloader: {data_length}')
 
         # inject total_training_steps to actor/critic optim_config. This is hacky.
-        total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
+        total_training_steps = data_length * self.config.trainer.total_epochs
 
         if self.config.trainer.total_training_steps is not None:
             total_training_steps = self.config.trainer.total_training_steps
@@ -780,7 +799,12 @@ class RayPPOTrainer(object):
 
         # save dataloader
         dataloader_local_path = os.path.join(local_global_step_folder, 'data.pt')
-        dataloader_state_dict = self.train_dataloader.state_dict()
+        multimodal_dataloader_state_dict = self.train_multimodal_dataloader.state_dict()
+        text_dataloader_state_dict = self.train_text_dataloader.state_dict()
+        dataloader_state_dict = {
+            'multimodal': multimodal_dataloader_state_dict,
+            'text': text_dataloader_state_dict
+        }
         torch.save(dataloader_state_dict, dataloader_local_path)
 
         # latest checkpointed iteration tracker (for atomic usage)
@@ -838,7 +862,10 @@ class RayPPOTrainer(object):
         dataloader_local_path = os.path.join(global_step_folder, 'data.pt')
         if os.path.exists(dataloader_local_path):
             dataloader_state_dict = torch.load(dataloader_local_path)
-            self.train_dataloader.load_state_dict(dataloader_state_dict)
+            multimodal_dataloader_state_dict = dataloader_state_dict['multimodal']
+            text_dataloader_state_dict = dataloader_state_dict['text']
+            self.train_multimodal_dataloader.load_state_dict(multimodal_dataloader_state_dict)
+            self.train_text_dataloader.load_state_dict(text_dataloader_state_dict)
         else:
             print(f"Warning: No dataloader state found at {dataloader_local_path}, will start from scratch")
 
@@ -891,7 +918,8 @@ class RayPPOTrainer(object):
         self.global_steps += 1
 
         for epoch in range(self.config.trainer.total_epochs):
-            for batch_dict in self.train_dataloader:
+            train_dataloader = random.choice([self.train_multimodal_dataloader, self.train_text_dataloader])
+            for batch_dict in train_dataloader:
                 metrics = {}
                 timing_raw = {}
 

@@ -59,12 +59,12 @@ def process_image(image: dict, max_pixels: int = 2048 * 2048, min_pixels: int = 
     if (image.width * image.height) > max_pixels:
         resize_factor = math.sqrt(max_pixels / (image.width * image.height))
         width, height = int(image.width * resize_factor), int(image.height * resize_factor)
-        image = image.resize((width, height), resample=Image.Resampling.NEAREST)
+        image = image.resize((width, height))
 
     if (image.width * image.height) < min_pixels:
         resize_factor = math.sqrt(min_pixels / (image.width * image.height))
         width, height = int(image.width * resize_factor), int(image.height * resize_factor)
-        image = image.resize((width, height), resample=Image.Resampling.NEAREST)
+        image = image.resize((width, height))
 
     if image.mode != 'RGB':
         image = image.convert('RGB')
@@ -202,7 +202,7 @@ class RLHFDataset(Dataset):
             )  # (3, seq_len)
         else:
             position_ids = compute_position_id_with_mask(attention_mask)
-            position_ids = position_ids.unsqueeze(0).expand(3, -1) # (3, seq_len)
+            position_ids = position_ids.expand(3, -1) # (3, seq_len)
 
         row_dict['input_ids'] = input_ids[0]
         row_dict['attention_mask'] = attention_mask[0]

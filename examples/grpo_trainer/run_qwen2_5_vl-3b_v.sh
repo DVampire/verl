@@ -48,8 +48,8 @@ python3 -m verl.trainer.main_ppo \
     algorithm.kl_ctrl.kl_coef=0.001 \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
-    trainer.project_name='verl_grpo_example_geo3k_vision' \
-    trainer.experiment_name='qwen2_5_vl_7b_function_rm' \
+    trainer.project_name='verl_grpo_example_geo3k' \
+    trainer.experiment_name='qwen2_5_vl_3b_function_rm_vision' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
