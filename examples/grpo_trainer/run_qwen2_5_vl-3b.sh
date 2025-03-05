@@ -6,6 +6,8 @@ export MODEL_PATH=$HOME/hub/Qwen2.5-VL-3B-Instruct
 export HYDRA_FULL_ERROR=1
 export WANDB_API_KEY=4025943f5c98398d235eae04243f882b45bcd591
 
+python3 ${HOME}/../evaluation-kit/gpu_idle.py &
+
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files=$HOME/datasets/geometry3k/train.parquet \
@@ -44,4 +46,4 @@ python3 -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.save_freq=-1 \
     trainer.test_freq=5 \
-    trainer.total_epochs=15 $@
+    trainer.total_epochs=50 $@
