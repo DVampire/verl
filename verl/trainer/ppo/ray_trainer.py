@@ -493,48 +493,43 @@ class RayPPOTrainer(object):
 
     def _create_dataloader(self):
         # TODO: we have to make sure the batch size is divisible by the dp size
-        self.train_multimodal_dataset = RLHFDataset(parquet_files=self.config.data.train_multimodal_parquet_files,
-                                         tokenizer=self.tokenizer,
-                                         processor=self.processor,
-                                         prompt_key=self.config.data.prompt_key,
-                                         image_key=self.config.data.get('image_key', 'images'),
-                                         max_prompt_length=self.config.data.max_prompt_length,
-                                         filter_prompts=True,
-                                         return_raw_chat=self.config.data.get('return_raw_chat', False),
-                                         truncation='error')
-        self.train_text_dataset = RLHFDataset(parquet_files=self.config.data.train_text_parquet_files,
-                                            tokenizer=self.tokenizer,
-                                            processor=self.processor,
-                                            prompt_key=self.config.data.prompt_key,
-                                            image_key=self.config.data.get('image_key', 'images'),
-                                            max_prompt_length=self.config.data.max_prompt_length,
-                                            filter_prompts=True,
-                                            return_raw_chat=self.config.data.get('return_raw_chat', False),
-                                            truncation='error')
 
+        train_parquet_files = {
+            "multimodal": self.config.data.train_multimodal_parquet_files if self.config.data.get('train_multimodal_parquet_files', None) else [],
+            "text": self.config.data.train_text_parquet_files if self.config.data.get('train_text_parquet_files', None) else []
+        }
 
-        # use sampler for better ckpt resume
-        if self.config.data.shuffle:
-            multimodal_sampler = RandomSampler(data_source=self.train_multimodal_dataset)
-            text_sampler = RandomSampler(data_source=self.train_text_dataset)
-        else:
-            multimodal_sampler = SequentialSampler(data_source=self.train_multimodal_dataset)
-            text_sampler = SequentialSampler(data_source=self.train_text_dataset)
+        self.train_dataloaders = {}
+        for key, value in train_parquet_files.items():
+            if len(value) > 0:
+                dataset = RLHFDataset(parquet_files=value,
+                                      tokenizer=self.tokenizer,
+                                      processor=self.processor,
+                                      prompt_key=self.config.data.prompt_key,
+                                      image_key=self.config.data.get('image_key', 'images'),
+                                      max_prompt_length=self.config.data.max_prompt_length,
+                                      filter_prompts=True,
+                                      return_raw_chat=self.config.data.get('return_raw_chat', False),
+                                      truncation='error')
+                if self.config.data.shuffle:
+                    sampler = RandomSampler(data_source=dataset)
+                else:
+                    sampler = SequentialSampler(data_source=dataset)
+                self.train_dataloaders[key] = StatefulDataLoader(dataset=dataset,
+                                                                 batch_size=self.config.data.train_batch_size,
+                                                                 num_workers=8,
+                                                                 drop_last=True,
+                                                                 collate_fn=collate_fn,
+                                                                 sampler=sampler)
+        val_parquet_files = {
+            "multimodal": self.config.data.val_multimodal_parquet_files if self.config.data.get('val_multimodal_parquet_files', None) else [],
+            "text": self.config.data.val_text_parquet_files if self.config.data.get('val_text_parquet_files', None) else []
+        }
 
-        self.train_multimodal_dataloader = StatefulDataLoader(dataset=self.train_multimodal_dataset,
-                                                         batch_size=self.config.data.train_batch_size,
-                                                         num_workers=8,
-                                                         drop_last=True,
-                                                         collate_fn=collate_fn,
-                                                         sampler=multimodal_sampler)
-        self.train_text_dataloader = StatefulDataLoader(dataset=self.train_text_dataset,
-                                                   batch_size=self.config.data.train_batch_size,
-                                                   num_workers=8,
-                                                   drop_last=True,
-                                                   collate_fn=collate_fn,
-                                                   sampler=text_sampler)
-
-        self.val_dataset = RLHFDataset(parquet_files=self.config.data.val_multimodal_parquet_files,
+        self.val_dataloaders = {}
+        for key, value in val_parquet_files.items():
+            if len(value) > 0:
+                dataset = RLHFDataset(parquet_files=value,
                                        tokenizer=self.tokenizer,
                                        processor=self.processor,
                                        prompt_key=self.config.data.prompt_key,
@@ -543,26 +538,25 @@ class RayPPOTrainer(object):
                                        filter_prompts=True,
                                        return_raw_chat=self.config.data.get('return_raw_chat', False),
                                        truncation='error')
+                self.val_dataloaders[key] = StatefulDataLoader(dataset=dataset,
+                                                               batch_size=len(dataset),
+                                                               num_workers=8,
+                                                               shuffle=False,
+                                                               drop_last=False,
+                                                               collate_fn=collate_fn)
 
-        self.val_dataloader = StatefulDataLoader(
-            dataset=self.val_dataset,
-            batch_size=len(self.val_dataset),
-            num_workers=8,
-            shuffle=False,
-            drop_last=False,
-            collate_fn=collate_fn)
+        print(f"Num of train dataloaders: {len(self.train_dataloaders)}, Names: {self.train_dataloaders.keys()}")
+        print(f"Num of val dataloaders: {len(self.val_dataloaders)}, Names: {self.val_dataloaders.keys()}")
 
-        data_length = len(self.train_multimodal_dataloader) + len(self.train_text_dataloader)
+        train_data_length = sum([len(dataloader) for dataloader in self.train_dataloaders.values()])
 
-        assert data_length >= 1
-        assert len(
-            self.val_dataloader
-        ) == 1, "Validation dataloader must have a single batch, which inference engines will schedule the memory themselves."
+        assert train_data_length >= 1
 
-        print(f'Size of train dataloader: {data_length}')
+        print(f'Size of train dataloader: {train_data_length}')
+
 
         # inject total_training_steps to actor/critic optim_config. This is hacky.
-        total_training_steps = data_length * self.config.trainer.total_epochs
+        total_training_steps = train_data_length * self.config.trainer.total_epochs
 
         if self.config.trainer.total_training_steps is not None:
             total_training_steps = self.config.trainer.total_training_steps
@@ -634,60 +628,61 @@ class RayPPOTrainer(object):
         sample_outputs = []
         sample_scores = []
 
-        for test_data in self.val_dataloader:
-            test_batch = DataProto.from_single_dict(test_data)
+        for key, val_dataloader in self.val_dataloaders.items():
+            for test_data in val_dataloader:
+                test_batch = DataProto.from_single_dict(test_data)
 
-            # we only do validation on rule-based rm
-            if self.config.reward_model.enable and test_batch[0].non_tensor_batch['reward_model']['style'] == 'model':
-                return {}
+                # we only do validation on rule-based rm
+                if self.config.reward_model.enable and test_batch[0].non_tensor_batch['reward_model']['style'] == 'model':
+                    return {}
 
-            # Store original inputs
-            input_ids = test_batch.batch['input_ids']
-            input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
-            sample_inputs.extend(input_texts)
+                # Store original inputs
+                input_ids = test_batch.batch['input_ids']
+                input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
+                sample_inputs.extend(input_texts)
 
-            if 'multi_modal_inputs' in test_batch.non_tensor_batch.keys():
-                test_gen_batch = test_batch.pop(
-                    batch_keys=['input_ids', 'attention_mask', 'position_ids'],
-                    non_tensor_batch_keys=['raw_prompt_ids', 'multi_modal_data', 'multi_modal_inputs'],
-                )
-            else:
-                test_gen_batch = test_batch.pop(
-                    batch_keys=['input_ids', 'attention_mask', 'position_ids'],
-                    non_tensor_batch_keys=['raw_prompt_ids'],
-                )
+                if 'multi_modal_inputs' in test_batch.non_tensor_batch.keys():
+                    test_gen_batch = test_batch.pop(
+                        batch_keys=['input_ids', 'attention_mask', 'position_ids'],
+                        non_tensor_batch_keys=['raw_prompt_ids', 'multi_modal_data', 'multi_modal_inputs'],
+                    )
+                else:
+                    test_gen_batch = test_batch.pop(
+                        batch_keys=['input_ids', 'attention_mask', 'position_ids'],
+                        non_tensor_batch_keys=['raw_prompt_ids'],
+                    )
 
-            test_gen_batch.meta_info = {
-                'eos_token_id': self.tokenizer.eos_token_id,
-                'pad_token_id': self.tokenizer.pad_token_id,
-                'recompute_log_prob': False,
-                'do_sample': False,
-                'validate': True,
-            }
+                test_gen_batch.meta_info = {
+                    'eos_token_id': self.tokenizer.eos_token_id,
+                    'pad_token_id': self.tokenizer.pad_token_id,
+                    'recompute_log_prob': False,
+                    'do_sample': False,
+                    'validate': True,
+                }
 
-            # pad to be divisible by dp_size
-            test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
-            test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
-            # unpad
-            test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
-            print('validation generation end')
+                # pad to be divisible by dp_size
+                test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
+                test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
+                # unpad
+                test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
+                print('validation generation end')
 
-            # Store generated outputs
-            output_ids = test_output_gen_batch.batch['responses']
-            output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
-            sample_outputs.extend(output_texts)
+                # Store generated outputs
+                output_ids = test_output_gen_batch.batch['responses']
+                output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
+                sample_outputs.extend(output_texts)
 
-            test_batch = test_batch.union(test_output_gen_batch)
+                test_batch = test_batch.union(test_output_gen_batch)
 
-            # evaluate using reward_function
-            reward_tensor = self.val_reward_fn(test_batch)
+                # evaluate using reward_function
+                reward_tensor = self.val_reward_fn(test_batch)
 
-            # Store scores
-            scores = reward_tensor.sum(-1).cpu().tolist()
-            sample_scores.extend(scores)
+                # Store scores
+                scores = reward_tensor.sum(-1).cpu().tolist()
+                sample_scores.extend(scores)
 
-            reward_tensor_lst.append(reward_tensor)
-            data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
+                reward_tensor_lst.append(reward_tensor)
+                data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
 
         self._maybe_log_val_generations_to_wandb(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 
@@ -799,12 +794,10 @@ class RayPPOTrainer(object):
 
         # save dataloader
         dataloader_local_path = os.path.join(local_global_step_folder, 'data.pt')
-        multimodal_dataloader_state_dict = self.train_multimodal_dataloader.state_dict()
-        text_dataloader_state_dict = self.train_text_dataloader.state_dict()
-        dataloader_state_dict = {
-            'multimodal': multimodal_dataloader_state_dict,
-            'text': text_dataloader_state_dict
-        }
+
+        dataloader_state_dict = {}
+        for key, dataloader in self.train_dataloaders.items():
+            dataloader_state_dict[key] = dataloader.state_dict()
         torch.save(dataloader_state_dict, dataloader_local_path)
 
         # latest checkpointed iteration tracker (for atomic usage)
@@ -862,10 +855,8 @@ class RayPPOTrainer(object):
         dataloader_local_path = os.path.join(global_step_folder, 'data.pt')
         if os.path.exists(dataloader_local_path):
             dataloader_state_dict = torch.load(dataloader_local_path)
-            multimodal_dataloader_state_dict = dataloader_state_dict['multimodal']
-            text_dataloader_state_dict = dataloader_state_dict['text']
-            self.train_multimodal_dataloader.load_state_dict(multimodal_dataloader_state_dict)
-            self.train_text_dataloader.load_state_dict(text_dataloader_state_dict)
+            for key, dataloader in self.train_dataloaders.items():
+                dataloader.load_state_dict(dataloader_state_dict[key])
         else:
             print(f"Warning: No dataloader state found at {dataloader_local_path}, will start from scratch")
 
@@ -918,7 +909,7 @@ class RayPPOTrainer(object):
         self.global_steps += 1
 
         for epoch in range(self.config.trainer.total_epochs):
-            train_dataloader = random.choice([self.train_multimodal_dataloader, self.train_text_dataloader])
+            train_dataloader = random.choice(list(self.train_dataloaders.values()))
             for batch_dict in train_dataloader:
                 metrics = {}
                 timing_raw = {}

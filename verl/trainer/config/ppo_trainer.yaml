@@ -1,8 +1,9 @@
 data:
   tokenizer: null
-  train_multimodal_parquet_files: ~/data/rlhf/gsm8k/train.parquet
-  train_text_parquet_files: ~/data/rlhf/gsm8k/train.parquet
-  val_multimodal_parquet_files: ~/data/rlhf/gsm8k/test.parquet
+  train_multimodal_parquet_files: null
+  train_text_parquet_files: null
+  val_multimodal_parquet_files: null
+  val_text_parquet_files: null
   prompt_key: prompt
   max_prompt_length: 512
   max_response_length: 512

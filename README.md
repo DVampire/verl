@@ -146,3 +146,8 @@ Then, make sure you are at top level of verl repo and run
 bash scripts/format.sh
 ```
 We are HIRING! Send us an [email](mailto:haibin.lin@bytedance.com) if you are interested in internship/FTE opportunities in MLSys/LLM reasoning/multimodal alignment.
+
+```
+pip install modelscope -U
+pip install mathruler
+```

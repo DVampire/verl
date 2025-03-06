@@ -2,29 +2,37 @@ set -x
 
 export VLLM_ATTENTION_BACKEND=XFORMERS
 export HOME=/mnt/2050data/wentao.zhang/verl
-export MODEL_PATH=$HOME/hub/Qwen2.5-VL-3B-Instruct
+export HUB_PATH=/mnt/2050data/wentao.zhang/hub
+export MODEL_PATH=$HUB_PATH/Qwen2.5-VL-3B-Instruct
 export HYDRA_FULL_ERROR=1
 export WANDB_API_KEY=4025943f5c98398d235eae04243f882b45bcd591
 
 python3 ${HOME}/../evaluation-kit/gpu_idle.py &
+
+nnodes=1
+n_gpus_per_node=8
+total_epochs=30
+project_name='verl'
+model_name=$MODEL_PATH
+experiment_name='verl_Qwen2.5-VL-3B-Instruct_V_GRPO'
 
 mm_train_path=$HOME/datasets/geometry3k/train.parquet
 mm_test_path=$HOME/datasets/geometry3k/test.parquet
 gsm8k_train_path=$HOME/datasets/gsm8k/train.parquet
 gsm8k_test_path=$HOME/datasets/gsm8k/test.parquet
 
-train_files="['$mm_train_path']"
-test_files="['$mm_test_path']"
+train_multimodal_parquet_files="['$mm_train_path']"
+val_multimodal_parquet_files="['$mm_test_path']"
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files="$train_files" \
-    data.val_files="$test_files" \
+    data.train_multimodal_parquet_files="$train_multimodal_parquet_files" \
+    data.val_multimodal_parquet_files="$val_multimodal_parquet_files" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
     data.image_key=images \
-    actor_rollout_ref.model.path=$MODEL_PATH \
+    actor_rollout_ref.model.path=$model_name \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=128 \
@@ -48,10 +56,10 @@ python3 -m verl.trainer.main_ppo \
     algorithm.kl_ctrl.kl_coef=0.001 \
     trainer.critic_warmup=0 \
     trainer.logger=['console','wandb'] \
-    trainer.project_name='verl_grpo_example_geo3k' \
-    trainer.experiment_name='qwen2_5_vl_3b_function_rm_vision' \
-    trainer.n_gpus_per_node=8 \
-    trainer.nnodes=1 \
-    trainer.save_freq=-1 \
+    trainer.project_name=$project_name \
+    trainer.experiment_name=$experiment_name \
+    trainer.n_gpus_per_node=$n_gpus_per_node \
+    trainer.nnodes=$nnodes \
+    trainer.save_freq=5 \
     trainer.test_freq=5 \
-    trainer.total_epochs=50 $@
+    trainer.total_epochs=$total_epochs $@

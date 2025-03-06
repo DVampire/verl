@@ -3,7 +3,7 @@ set -x
 export VLLM_ATTENTION_BACKEND=XFORMERS
 export HOME=/mnt/2050data/wentao.zhang/verl
 export HUB_PATH=/mnt/2050data/wentao.zhang/hub
-export MODEL_PATH=$HUB_PATH/Qwen2.5-VL-3B-Instruct
+export MODEL_PATH=$HUB_PATH/Qwen2.5-VL-7B-Instruct
 export HYDRA_FULL_ERROR=1
 export WANDB_API_KEY=4025943f5c98398d235eae04243f882b45bcd591
 
@@ -14,7 +14,7 @@ n_gpus_per_node=8
 total_epochs=30
 project_name='verl'
 model_name=$MODEL_PATH
-experiment_name='verl_Qwen2.5-VL-3B-Instruct_VT_GRPO'
+experiment_name='verl_Qwen2.5-VL-7B-Instruct_VT_GRPO'
 
 
 mm_train_path=$HOME/datasets/geometry3k/train.parquet
