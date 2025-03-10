@@ -1,8 +1,10 @@
 set -x
 
+export DISK_PATH=datasets_rl
 export VLLM_ATTENTION_BACKEND=XFORMERS
-export HOME=/mnt/2050data/wentao.zhang/verl
-export HUB_PATH=/mnt/2050data/wentao.zhang/hub
+export HOME=/mnt/$DISK_PATH/wentao.zhang/verl
+export DATASETS=/mnt/$DISK_PATH/wentao.zhang/datasets
+export HUB_PATH=/mnt/$DISK_PATH/wentao.zhang/hub
 export MODEL_PATH=$HUB_PATH/Qwen2.5-VL-3B-Instruct
 export HYDRA_FULL_ERROR=1
 export WANDB_API_KEY=4025943f5c98398d235eae04243f882b45bcd591
@@ -12,15 +14,16 @@ python3 ${HOME}/../evaluation-kit/gpu_idle.py &
 nnodes=1
 n_gpus_per_node=8
 total_epochs=30
+tensor_model_parallel_size=2
 project_name='verl'
 model_name=$MODEL_PATH
 experiment_name='verl_Qwen2.5-VL-3B-Instruct_VT_GRPO'
 
 
-mm_train_path=$HOME/datasets/geometry3k/train.parquet
-mm_test_path=$HOME/datasets/geometry3k/test.parquet
-gsm8k_train_path=$HOME/datasets/gsm8k/train.parquet
-gsm8k_test_path=$HOME/datasets/gsm8k/test.parquet
+mm_train_path=$DATASETS/geometry3k/train.parquet
+mm_test_path=$DATASETS/geometry3k/test.parquet
+gsm8k_train_path=$DATASETS/gsm8k/train.parquet
+gsm8k_test_path=$DATASETS/gsm8k/test.parquet
 
 train_multimodal_parquet_files="['$mm_train_path']"
 train_text_parquet_files="['$gsm8k_train_path']"
@@ -49,7 +52,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=20 \
-    actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=${tensor_model_parallel_size} \
     actor_rollout_ref.rollout.name=vllm \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
