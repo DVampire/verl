@@ -25,6 +25,7 @@ from pprint import pprint
 from typing import Type, Dict
 from copy import deepcopy
 
+import ray
 import numpy as np
 from codetiming import Timer
 from omegaconf import OmegaConf, open_dict
@@ -38,6 +39,7 @@ from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seql
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
 from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn
 from torch.utils.data import RandomSampler, SequentialSampler, SubsetRandomSampler
+from verl.utils.tracking import ValidationGenerationsLogger
 from torchdata.stateful_dataloader import StatefulDataLoader
 import random
 
@@ -89,9 +91,38 @@ class ResourcePoolManager:
                                             name_prefix=resource_pool_name)
             self.resource_pool_dict[resource_pool_name] = resource_pool
 
+        self._check_resource_available()
+
     def get_resource_pool(self, role: Role) -> RayResourcePool:
         """Get the resource pool of the worker_cls"""
         return self.resource_pool_dict[self.mapping[role]]
+
+    def _check_resource_available(self):
+        """Check if the resource pool can be satisfied in this ray cluster."""
+        node_available_resources = ray.state.available_resources_per_node()
+        node_available_gpus = {node: node_info.get('GPU', 0) for node, node_info in node_available_resources.items()}
+
+        # check total required gpus can be satisfied
+        total_available_gpus = sum(node_available_gpus.values())
+        total_required_gpus = sum(
+            [num_gpus for process_on_nodes in self.resource_pool_spec.values() for num_gpus in process_on_nodes])
+        if total_available_gpus < total_required_gpus:
+            raise ValueError(
+                f"Total available GPUs {total_available_gpus} is less than total desired GPUs {total_required_gpus}")
+
+        # check each resource pool can be satisfied, O(#resource_pools * #nodes)
+        for resource_pool_name, process_on_nodes in self.resource_pool_spec.items():
+            num_gpus, num_nodes = process_on_nodes[0], len(process_on_nodes)
+            for node, available_gpus in node_available_gpus.items():
+                if available_gpus >= num_gpus:
+                    node_available_gpus[node] -= num_gpus
+                    num_nodes -= 1
+                    if num_nodes == 0:
+                        break
+            if num_nodes > 0:
+                raise ValueError(
+                    f"Resource pool {resource_pool_name}: {num_gpus}*{num_nodes} cannot be satisfied in this ray cluster"
+                )
 
 
 import torch
@@ -336,6 +367,19 @@ def compute_timing_metrics(batch, timing_raw):
     }
 
 
+def compute_throughout_metrics(batch, timing_raw, n_gpus):
+    total_num_tokens = sum(batch.meta_info['global_token_num'])
+    time = timing_raw["step"]
+    # estimated_flops, promised_flops = flops_function.estimate_flops(num_tokens, time)
+    # f'Actual TFLOPs/s/GPU​': estimated_flops/(n_gpus),
+    # f'Theoretical TFLOPs/s/GPU​': promised_flops,
+    return {
+        f'total_num_tokens': total_num_tokens,
+        f'time_per_step': time,
+        f'Tokens/Sec/GPU': total_num_tokens / (time * n_gpus),
+    }
+
+
 @contextmanager
 def _timer(name: str, timing_raw: Dict[str, float]):
     with Timer(name=name, logger=None) as timer:
@@ -379,6 +423,7 @@ class RayPPOTrainer(object):
         self.use_reference_policy = Role.RefPolicy in role_worker_mapping
         self.use_rm = Role.RewardModel in role_worker_mapping
         self.ray_worker_group_cls = ray_worker_group_cls
+        self.validation_generations_logger = ValidationGenerationsLogger()
 
         # define KL control
         if self.use_reference_policy:
@@ -569,20 +614,14 @@ class RayPPOTrainer(object):
             self.config.actor_rollout_ref.actor.optim.total_training_steps = total_training_steps
             self.config.critic.optim.total_training_steps = total_training_steps
 
-    def _maybe_log_val_generations_to_wandb(self, inputs, outputs, scores):
-        """Log a table of validation samples to wandb"""
+    def _maybe_log_val_generations(self, inputs, outputs, scores):
+        """Log a table of validation samples to the configured logger (wandb or swanlab)"""
 
         generations_to_log = self.config.trainer.val_generations_to_log_to_wandb
 
         if generations_to_log == 0:
             return
 
-        if generations_to_log > 0 and 'wandb' not in self.config.trainer.logger:
-            print(
-                'WARNING: `val_generations_to_log_to_wandb` is set to a positive value, but no wandb logger is found. ')
-            return
-
-        import wandb
         import numpy as np
 
         # Create tuples of (input, output, score) and sort by input text
@@ -596,28 +635,8 @@ class RayPPOTrainer(object):
         # Take first N samples after shuffling
         samples = samples[:generations_to_log]
 
-        # Create column names for all samples
-        columns = ["step"] + sum([[f"input_{i+1}", f"output_{i+1}", f"score_{i+1}"] for i in range(len(samples))], [])
-
-        if not hasattr(self, 'validation_table'):
-            # Initialize the table on first call
-            self.validation_table = wandb.Table(columns=columns)
-
-        # Create a new table with same columns and existing data
-        # Workaround for https://github.com/wandb/wandb/issues/2981#issuecomment-1997445737
-        new_table = wandb.Table(columns=columns, data=self.validation_table.data)
-
-        # Add new row with all data
-        row_data = []
-        row_data.append(self.global_steps)
-        for sample in samples:
-            row_data.extend(sample)
-
-        new_table.add_data(*row_data)
-
-        # Update reference and log
-        wandb.log({"val/generations": new_table}, step=self.global_steps)
-        self.validation_table = new_table
+        # Log to each configured logger
+        self.validation_generations_logger.log(self.config.trainer.logger, samples, self.global_steps)
 
     def _validate(self):
         reward_tensor_lst = []
@@ -684,7 +703,7 @@ class RayPPOTrainer(object):
                 reward_tensor_lst.append(reward_tensor)
                 data_source_lst.append(test_batch.non_tensor_batch.get('data_source', ['unknown'] * reward_tensor.shape[0]))
 
-        self._maybe_log_val_generations_to_wandb(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
+        self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
 
         reward_tensor = torch.cat(reward_tensor_lst, dim=0).sum(-1).cpu()  # (batch_size,)
         data_sources = np.concatenate(data_source_lst, axis=0)
@@ -812,7 +831,7 @@ class RayPPOTrainer(object):
 
         # load from hdfs
         if self.config.trainer.default_hdfs_dir is not None:
-            NotImplementedError('load from hdfs is not implemented yet')
+            raise NotImplementedError('load from hdfs is not implemented yet')
         else:
             checkpoint_folder = self.config.trainer.default_local_dir  # TODO: check path
             if not os.path.isabs(checkpoint_folder):
@@ -907,6 +926,7 @@ class RayPPOTrainer(object):
 
         # we start from step 1
         self.global_steps += 1
+        last_val_metrics = None
 
         for epoch in range(self.config.trainer.total_epochs):
             train_dataloader = random.choice(list(self.train_dataloaders.values()))
@@ -927,6 +947,8 @@ class RayPPOTrainer(object):
                         batch_keys=['input_ids', 'attention_mask', 'position_ids'],
                         non_tensor_batch_keys=['raw_prompt_ids'],
                     )
+
+                is_last_step = self.global_steps >= self.total_training_steps
 
                 with _timer('step', timing_raw):
                     # generate a batch
@@ -1026,13 +1048,15 @@ class RayPPOTrainer(object):
 
                     # validate
                     if self.val_reward_fn is not None and self.config.trainer.test_freq > 0 and \
-                        self.global_steps % self.config.trainer.test_freq == 0:
+                        (is_last_step or  self.global_steps % self.config.trainer.test_freq == 0):
                         with _timer('testing', timing_raw):
                             val_metrics: dict = self._validate()
+                            if is_last_step:
+                                last_val_metrics = val_metrics
                         metrics.update(val_metrics)
 
-                    if self.config.trainer.save_freq > 0 and \
-                            self.global_steps % self.config.trainer.save_freq == 0:
+                    if self.config.trainer.save_freq > 0 and ( is_last_step or \
+                            self.global_steps % self.config.trainer.save_freq == 0):
                         with _timer('save_checkpoint', timing_raw):
                             self._save_checkpoint()
 
@@ -1040,20 +1064,16 @@ class RayPPOTrainer(object):
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
 
+                config = self.config
+                n_gpus = config.trainer.n_gpus_per_node * config.trainer.nnodes
+                # Implement actual tflpo and theoretical tflpo
+                metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
+
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)
 
-                self.global_steps += 1
-
-                if self.global_steps >= self.total_training_steps:
-
-                    # perform validation after training
-                    if self.val_reward_fn is not None:
-                        val_metrics = self._validate()
-                        pprint(f'Final validation metrics: {val_metrics}')
-                        logger.log(data=val_metrics, step=self.global_steps)
-                    if self.config.trainer.save_freq > 0 and \
-                            (self.global_steps - 1) % self.config.trainer.save_freq != 0:
-                        with _timer('save_checkpoint', timing_raw):
-                            self._save_checkpoint()
+                if is_last_step:
+                    pprint(f'Final validation metrics: {last_val_metrics}')
                     return
+
+                self.global_steps += 1
