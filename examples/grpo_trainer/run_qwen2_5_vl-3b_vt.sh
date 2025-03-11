@@ -13,7 +13,7 @@ python3 ${HOME}/../evaluation-kit/gpu_idle.py &
 
 nnodes=1
 n_gpus_per_node=8
-total_epochs=30
+total_epochs=50
 tensor_model_parallel_size=2
 project_name='verl'
 model_name=$MODEL_PATH

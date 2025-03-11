@@ -13,7 +13,7 @@ python3 ${HOME}/../evaluation-kit/gpu_idle.py &
 
 nnodes=1
 n_gpus_per_node=8
-total_epochs=30
+total_epochs=50
 tensor_model_parallel_size=2
 project_name='verl'
 model_name=$MODEL_PATH
@@ -26,11 +26,13 @@ gsm8k_test_path=$DATASETS/gsm8k/test.parquet
 
 train_multimodal_parquet_files="['$mm_train_path']"
 val_multimodal_parquet_files="['$mm_test_path']"
+val_text_parquet_files="['$gsm8k_test_path']"
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_multimodal_parquet_files="$train_multimodal_parquet_files" \
     data.val_multimodal_parquet_files="$val_multimodal_parquet_files" \
+    data.val_text_parquet_files="$val_text_parquet_files" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
