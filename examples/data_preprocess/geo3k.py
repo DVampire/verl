@@ -51,7 +51,7 @@ if __name__ == '__main__':
 
         def process_fn(example, idx):
             problem = example.pop('problem')
-            prompt = problem + ' ' + instruction_following
+            prompt = problem + '\n' + instruction_following
             answer = example.pop('answer')
             images = example.pop('images')
 
