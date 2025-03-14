@@ -518,8 +518,13 @@ class ActorRolloutRefWorker(Worker):
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
             log_prob, hidden_states = self.actor.compute_log_prob(data=data)
-            output = DataProto.from_dict(tensors={'old_log_probs': log_prob, 'old_hidden_states': hidden_states},
-                                         meta_info={'temperature': self.config.rollout.temperature})
+
+            if hidden_states:
+                output = DataProto.from_dict(tensors={'old_log_probs': log_prob, 'old_hidden_states': hidden_states},
+                                             meta_info={'temperature': self.config.rollout.temperature})
+            else:
+                output = DataProto.from_dict(tensors={'old_log_probs': log_prob},
+                                             meta_info={'temperature': self.config.rollout.temperature})
             output = self.ulysses_sharding_manager.postprocess_data(output)
 
         output = output.to('cpu')
@@ -552,7 +557,13 @@ class ActorRolloutRefWorker(Worker):
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
             log_prob, hidden_states = self.ref_policy.compute_log_prob(data=data)
-            output = DataProto.from_dict(tensors={'ref_log_prob': log_prob, 'ref_hidden_states': hidden_states},)
+
+            if hidden_states:
+                output = DataProto.from_dict(tensors={'ref_log_prob': log_prob, 'ref_hidden_states': hidden_states},
+                                             meta_info={'temperature': self.config.rollout.temperature})
+            else:
+                output = DataProto.from_dict(tensors={'ref_log_prob': log_prob},
+                                             meta_info={'temperature': self.config.rollout.temperature})
             output = self.ulysses_sharding_manager.postprocess_data(output)
 
         output = output.to('cpu')
