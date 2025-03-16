@@ -67,6 +67,11 @@ def format_reward(predict_str: str) -> float:
     match_result = re.fullmatch(pattern, predict_str)
     return 1.0 if match_result else 0.0
 
+def length_reward(reason_str: str, max_length = 2048) -> float:
+    reason_str_length = len(reason_str)
+    reward = 1.0 * reason_str_length / max_length - 0.5
+    return reward
+
 def acc_reward(predict_str: str, ground_truth: str) -> float:
     return 1.0 if grade_answer(predict_str, ground_truth) else 0.0
 
@@ -76,9 +81,9 @@ def compute_score(predict_str: str, ground_truth: str) -> float:
     think = extract_think(predict_str)
     answer = extract_answer(predict_str)
 
-
+    think_score = length_reward(think)
     answer_score = acc_reward(answer, ground_truth)
 
-    score = 0.9 * answer_score + 0.1 * format_score
+    score = 0.8 * answer_score + 0.1 * format_score + 0.1 * think_score
 
     return score
