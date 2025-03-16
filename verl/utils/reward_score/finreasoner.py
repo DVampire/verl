@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import re
-
+from mathruler.grader import extract_boxed_content, grade_answer
 
 def parse(answer: str) -> str:
     answer = str(answer)
@@ -23,9 +23,6 @@ def parse(answer: str) -> str:
         float(answer)
         res_str = answer
     except Exception as e:
-
-        answer = answer.replace("<|im_end|>", "").strip()
-
         # match `A. balabala B. balabala`
         pattern = r'(?<!\w)([A-F])(?=\s|[.)\,]|$)(?:[.)\,]?\s*)(.*?)(?=[\s,]*[A-F](?:[.)\,]?\s*)|$)'
         matches = re.findall(pattern, answer, re.DOTALL)
@@ -55,144 +52,33 @@ def verify(answer: str, method="strict") -> bool:
     elif method == "flexible":
         raise NotImplementedError
 
+def extract_think(solution: str) -> str:
+    pattern = re.compile(r'<think>(.*)</think>', re.DOTALL)
+    match_result = re.search(pattern, solution)
+    return match_result.group(1) if match_result else ""
 
-def extract_solution(solution_str, method='strict'):
-    # this also tests the formatting of the model
-    solution = re.search(r"####\s+(.+)", solution_str, re.DOTALL)
-    if solution is None:
-        final_answer = None
-    else:
-        final_answer = solution.group(0)
-        final_answer = final_answer.replace("####", "").replace("$", "").strip()
-        final_answer = parse(final_answer)
-    return final_answer
+def extract_answer(solution: str) -> str:
+    answer = extract_boxed_content(solution)
+    answer = parse(answer)
+    return answer
 
+def format_reward(predict_str: str) -> float:
+    pattern = re.compile(r'<think>.*</think>.*\\boxed\{.*\}.*', re.DOTALL)
+    match_result = re.fullmatch(pattern, predict_str)
+    return 1.0 if match_result else 0.0
 
-def compute_score(solution_str, ground_truth, method='strict', format_score=0., score=1.):
-    """The scoring function for GSM8k.
+def acc_reward(predict_str: str, ground_truth: str) -> float:
+    return 1.0 if grade_answer(predict_str, ground_truth) else 0.0
 
-    Reference: Trung, Luong, et al. "Reft: Reasoning with reinforced fine-tuning." Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers). 2024.
+def compute_score(predict_str: str, ground_truth: str) -> float:
+    format_score = format_reward(predict_str)
 
-    Args:
-        solution_str: the solution text
-        ground_truth: the ground truth
-        method: the method to extract the solution, choices are 'strict' and 'flexible'
-        format_score: the score for the format
-        score: the score for the correct answer
-    """
-    answer = extract_solution(solution_str=solution_str, method=method)
-
-    print("-" * 100)
-    print("solution_str:", solution_str)
-    print("ground_truth:", ground_truth)
-    print("parse answer:", answer)
-    print("-" * 100)
-
-    if answer is None:
-        return 0
-    else:
-        if answer == ground_truth:
-            return score
-        else:
-            return format_score
+    think = extract_think(predict_str)
+    answer = extract_answer(predict_str)
 
 
-if __name__ == '__main__':
-    solution_str = "The answer is #### {}"
-    cases = ['A', 'A. bala', 'A) bala', 'A.bala', 'Abala', 'A bala', 'A,B', 'A. bala B. bala', 'A) bala B) bala',
-             'A.bala B.bala', 'Abala Bbala', 'A bala B bala', 'A and B', 'A. bala and B. bala', 'A) bala and B) bala',
-             'A.bala and B.bala', 'Abala and Bbala', 'A bala and B bala', 'A,B,C', 'A. bala B. bala C. bala',
-             'A) bala B) bala C) bala', 'A.bala B.bala C.bala', 'Abala Bbala Cbala', 'A bala B bala C bala',
-             'A, B and C',
-             'A. bala, B. bala and C. bala', 'A) bala, B) bala and C) bala', 'A.bala, B.bala and C.bala',
-             'Abala, Bbala and Cbala', 'A bala, B bala and C bala', '120', '+120', '-120', '120.3', '+120.3', '-120.3',
-             '120e3',
-             '120e-3', '+120e3', '+120e-3', '-120e3', '-120e-3', '120.3e3', '120.3e-3', '+120.3e3', '+120.3e-3',
-             '-120.3e3',
-             '-120.3e-3', '120E3', '120E-3', '+120E3', '+120E-3', '-120E3', '-120E-3', '120.3E3', '120.3E-3',
-             '+120.3E3',
-             '+120.3E-3', '-120.3E3', '-120.3E-3', '120F', '120.3F', '+120F', '+120.3F', '-120F', '-120.3F', '120e3F',
-             '120e-3F', '+120e3F', '+120e-3F', '-120e3F', '-120e-3F', '120.3e3F', '120.3e-3F', '+120.3e3F',
-             '+120.3e-3F',
-             '-120.3e3F', '-120.3e-3F', '120E3F', '120E-3F', '+120E3F', '+120E-3F', '-120E3F', '-120E-3F', '120.3E3F',
-             '120.3E-3F', '+120.3E3F', '+120.3E-3F', '-120.3E3F', '-120.3E-3F', 'The answer is A.',
-             'The answer is A. bala.',
-             'The answer is A) bala.', 'The answer is A.bala.', 'The answer is Abala.', 'The answer is A bala.',
-             'The answer is A,B.', 'The answer is A. bala B. bala.', 'The answer is A) bala B) bala.',
-             'The answer is A.bala B.bala.', 'The answer is Abala Bbala.', 'The answer is A bala B bala.',
-             'The answer is A and B.', 'The answer is A. bala and B. bala.', 'The answer is A) bala and B) bala.',
-             'The answer is A.bala and B.bala.', 'The answer is Abala and Bbala.', 'The answer is A bala and B bala.',
-             'The answer is A,B,C.', 'The answer is A. bala B. bala C. bala.', 'The answer is A) bala B) bala C) bala.',
-             'The answer is A.bala B.bala C.bala.', 'The answer is Abala Bbala Cbala.',
-             'The answer is A bala B bala C bala.',
-             'The answer is A, B and C.', 'The answer is A. bala, B. bala and C. bala.',
-             'The answer is A) bala, B) bala and C) bala.', 'The answer is A.bala, B.bala and C.bala.',
-             'The answer is Abala, Bbala and Cbala.', 'The answer is A bala, B bala and C bala.', 'The answer is 120.',
-             'The answer is +120.', 'The answer is -120.', 'The answer is 120.3.', 'The answer is +120.3.',
-             'The answer is -120.3.', 'The answer is 120e3.', 'The answer is 120e-3.', 'The answer is +120e3.',
-             'The answer is +120e-3.', 'The answer is -120e3.', 'The answer is -120e-3.', 'The answer is 120.3e3.',
-             'The answer is 120.3e-3.', 'The answer is +120.3e3.', 'The answer is +120.3e-3.',
-             'The answer is -120.3e3.',
-             'The answer is -120.3e-3.', 'The answer is 120E3.', 'The answer is 120E-3.', 'The answer is +120E3.',
-             'The answer is +120E-3.', 'The answer is -120E3.', 'The answer is -120E-3.', 'The answer is 120.3E3.',
-             'The answer is 120.3E-3.', 'The answer is +120.3E3.', 'The answer is +120.3E-3.',
-             'The answer is -120.3E3.',
-             'The answer is -120.3E-3.', 'The answer is 120F.', 'The answer is 120.3F.', 'The answer is +120F.',
-             'The answer is +120.3F.', 'The answer is -120F.', 'The answer is -120.3F.', 'The answer is 120e3F.',
-             'The answer is 120e-3F.', 'The answer is +120e3F.', 'The answer is +120e-3F.', 'The answer is -120e3F.',
-             'The answer is -120e-3F.', 'The answer is 120.3e3F.', 'The answer is 120.3e-3F.',
-             'The answer is +120.3e3F.',
-             'The answer is +120.3e-3F.', 'The answer is -120.3e3F.', 'The answer is -120.3e-3F.',
-             'The answer is 120E3F.',
-             'The answer is 120E-3F.', 'The answer is +120E3F.', 'The answer is +120E-3F.', 'The answer is -120E3F.',
-             'The answer is -120E-3F.', 'The answer is 120.3E3F.', 'The answer is 120.3E-3F.',
-             'The answer is +120.3E3F.',
-             'The answer is +120.3E-3F.', 'The answer is -120.3E3F.', 'The answer is -120.3E-3F.']
-    gts = ['A', 'A', 'A', 'A', 'A', 'A', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B',
-           'A,B',
-           'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C',
-           '120',
-           '+120', '-120', '120.3', '+120.3', '-120.3', '120e3', '120e-3', '+120e3', '+120e-3', '-120e3', '-120e-3',
-           '120.3e3', '120.3e-3', '+120.3e3', '+120.3e-3', '-120.3e3', '-120.3e-3', '120E3', '120E-3', '+120E3',
-           '+120E-3',
-           '-120E3', '-120E-3', '120.3E3', '120.3E-3', '+120.3E3', '+120.3E-3', '-120.3E3', '-120.3E-3', '120F',
-           '120.3F',
-           '+120F', '+120.3F', '-120F', '-120.3F', '120e3F', '120e-3F', '+120e3F', '+120e-3F', '-120e3F', '-120e-3F',
-           '120.3e3F', '120.3e-3F', '+120.3e3F', '+120.3e-3F', '-120.3e3F', '-120.3e-3F', '120E3F', '120E-3F',
-           '+120E3F',
-           '+120E-3F', '-120E3F', '-120E-3F', '120.3E3F', '120.3E-3F', '+120.3E3F', '+120.3E-3F', '-120.3E3F',
-           '-120.3E-3F',
-           'A', 'A', 'A', 'A', 'A', 'A', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B', 'A,B',
-           'A,B',
-           'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C', 'A,B,C',
-           '120',
-           '+120', '-120', '120.3', '+120.3', '-120.3', '120e3', '120e-3', '+120e3', '+120e-3', '-120e3', '-120e-3',
-           '120.3e3', '120.3e-3', '+120.3e3', '+120.3e-3', '-120.3e3', '-120.3e-3', '120E3', '120E-3', '+120E3',
-           '+120E-3',
-           '-120E3', '-120E-3', '120.3E3', '120.3E-3', '+120.3E3', '+120.3E-3', '-120.3E3', '-120.3E-3', '120F',
-           '120.3F',
-           '+120F', '+120.3F', '-120F', '-120.3F', '120e3F', '120e-3F', '+120e3F', '+120e-3F', '-120e3F', '-120e-3F',
-           '120.3e3F', '120.3e-3F', '+120.3e3F', '+120.3e-3F', '-120.3e3F', '-120.3e-3F', '120E3F', '120E-3F',
-           '+120E3F',
-           '+120E-3F', '-120E3F', '-120E-3F', '120.3E3F', '120.3E-3F', '+120.3E3F', '+120.3E-3F', '-120.3E3F',
-           '-120.3E-3F']
+    answer_score = acc_reward(answer, ground_truth)
 
-    # for case, gt in zip(cases, gts):
-    #     case = solution_str.format(case)
-    #
-    #     case = case + ".<|im_end|>"
-    #
-    #     print(f"Case: {case}")
-    #     print(f"GT: {gt}")
-    #
-    #     print(f"Score: {compute_score(case, gt)}")
-    #     print("===")
+    score = 0.9 * answer_score + 0.1 * format_score
 
-    string = """
-    babababbaabbab
-
-    #### Conclusion:
-    The main benefit of upward-appraisal is that it can provide more clear and actionable information, thereby aiding in decision-making and action in performance cases. Therefore, the correct answer is:
-    A. More useful to collect information<|im_end|>
-    """
-    print(extract_solution(string))
+    return score
