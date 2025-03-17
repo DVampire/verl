@@ -10,7 +10,7 @@ nnodes=1
 n_gpus_per_node=4
 total_epochs=50
 tensor_model_parallel_size=2
-project_name='test'
+project_name='verl_diversity'
 model_name=${MODEL_PATH}
 experiment_name='verl_Qwen2.5-3B-Instruct_GRPO'
 
