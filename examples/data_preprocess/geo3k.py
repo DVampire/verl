@@ -28,12 +28,12 @@ import argparse
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--local_dir', default=os.path.join(ROOT, 'datasets/geometry3k'))
+    parser.add_argument('--local_dir', default=os.path.join(ROOT, 'datasets/hub/geometry3k'))
     parser.add_argument('--hdfs_dir', default=None)
 
     args = parser.parse_args()
 
-    data_path = os.path.join(ROOT, 'hub/geometry3k')
+    data_path = os.path.join(ROOT, 'datasets/raw/geometry3k')
     data_source = "hiyouga/geometry3k"
 
     dataset = datasets.load_dataset(data_path)
