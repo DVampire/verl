@@ -523,7 +523,7 @@ class ActorRolloutRefWorker(Worker):
             data = self.ulysses_sharding_manager.preprocess_data(data)
             log_prob, hidden_states = self.actor.compute_log_prob(data=data)
 
-            if hidden_states:
+            if hidden_states is not None:
                 output = DataProto.from_dict(tensors={'old_log_probs': log_prob, 'old_hidden_states': hidden_states},
                                              meta_info={'temperature': self.config.rollout.temperature})
             else:
@@ -562,7 +562,7 @@ class ActorRolloutRefWorker(Worker):
             data = self.ulysses_sharding_manager.preprocess_data(data)
             log_prob, hidden_states = self.ref_policy.compute_log_prob(data=data)
 
-            if hidden_states:
+            if hidden_states is not None:
                 output = DataProto.from_dict(tensors={'ref_log_prob': log_prob, 'ref_hidden_states': hidden_states},
                                              meta_info={'temperature': self.config.rollout.temperature})
             else:
