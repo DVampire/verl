@@ -1,5 +1,7 @@
 set -x
 
+export LANG=zh_CN.UTF-8
+export LC_ALL=zh_CN.UTF-8
 export VLLM_ATTENTION_BACKEND=XFORMERS
 export WORKHOME=$PWD
 export DATASETS=${WORKHOME}/datasets
