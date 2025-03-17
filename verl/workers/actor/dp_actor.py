@@ -50,7 +50,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.actor_optimizer = actor_optimizer
         self.use_remove_padding = self.config.get('use_remove_padding', False)
         self.use_hidden_states = self.config.get('use_hidden_states', False)
-        print(f'Actor use_remove_padding={self.use_remove_padding}')
+        print(f'Actor use_remove_padding={self.use_remove_padding}, use_hidden_states={self.use_hidden_states}')
         self.ulysses_sequence_parallel_size = self.config.ulysses_sequence_parallel_size
         self.use_ulysses_sp = self.ulysses_sequence_parallel_size > 1
 
