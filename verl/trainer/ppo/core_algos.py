@@ -155,18 +155,25 @@ def compute_grpo_outcome_advantage(token_level_rewards: torch.Tensor,
 
 
 def batch_diversity(embeddings):
-    print("embeddings", embeddings.shape)
-    norm_embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=-1)
+    """
+    Compute diversity of a batch of embeddings.
+    Args:
+        embeddings: (bsz, dim)
 
-    similarity_matrix = torch.mm(norm_embeddings, norm_embeddings.T)
+    Returns:
 
-    diversity_matrix = 1 - similarity_matrix
+    """
+    norm_embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=-1) # (bsz, dim)
 
-    mask = 1 - torch.eye(diversity_matrix.size(0), device=embeddings.device)
+    similarity_matrix = torch.mm(norm_embeddings, norm_embeddings.T) # (bsz, bsz)
 
-    diversity = (diversity_matrix * mask).sum(dim=-1) / (embeddings.size(0) - 1)
+    diversity_matrix = 1 - similarity_matrix # (bsz, bsz)
 
-    diversity = diversity / 2 # normalize to [0, 1]
+    mask = 1 - torch.eye(diversity_matrix.size(0), device=embeddings.device) # (bsz, bsz)
+
+    diversity = (diversity_matrix * mask).sum(dim=-1) / (embeddings.size(0) - 1) # (bsz,)
+
+    diversity = diversity / 2 # (bsz,), normalize to [0, 1]
 
     return diversity
 
@@ -195,6 +202,7 @@ def compute_grpo_dv_outcome_advantage(token_level_rewards: torch.Tensor,
 
     id2score = defaultdict(list)
     id2hidden_states = defaultdict(list)
+    id2hidden_states_indices = defaultdict(list)
     id2diversity = {}
     id2mean = {}
     id2std = {}
@@ -204,20 +212,26 @@ def compute_grpo_dv_outcome_advantage(token_level_rewards: torch.Tensor,
         for i in range(bsz):
             id2score[index[i]].append(scores[i])
             id2hidden_states[index[i]].append(hidden_states[i])
+            id2hidden_states_indices[index[i]].append(i)
 
         for idx in id2score:
             if len(id2score[idx]) == 1:
                 id2mean[idx] = torch.tensor(0.0)
                 id2std[idx] = torch.tensor(1.0)
-                id2diversity[idx] = torch.tensor(1.0)
+                bsz_index = id2hidden_states_indices[idx][0]
+                id2diversity[bsz_index] = torch.tensor(0.0)
             elif len(id2score[idx]) > 1:
                 id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
                 id2std[idx] = torch.std(torch.tensor([id2score[idx]]))
-                id2diversity[idx] = batch_diversity(torch.stack(id2hidden_states[idx], dim=0))
+
+                diversity = batch_diversity(torch.stack(id2hidden_states[idx], dim=0))
+                for i, bsz_index in enumerate(id2hidden_states_indices[idx]):
+                    id2diversity[bsz_index] = diversity[i]
             else:
                 raise ValueError(f"no score in prompt index: {idx}")
+
         for i in range(bsz):
-            scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon) + id2diversity[index[i]]
+            scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon) + id2diversity[i]
         scores = scores.unsqueeze(-1).tile([1, response_length]) * eos_mask
 
     return scores, scores
