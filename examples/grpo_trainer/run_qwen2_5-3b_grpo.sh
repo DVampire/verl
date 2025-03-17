@@ -31,11 +31,11 @@ python3 -m verl.trainer.main_ppo \
     data.val_text_parquet_files="$val_text_parquet_files" \
     data.train_batch_size=512 \
     data.max_prompt_length=1024 \
-    data.max_response_length=2048 \
+    data.max_response_length=1024 \
     data.image_key=images \
     actor_rollout_ref.model.path=$model_name \
     actor_rollout_ref.actor.optim.lr=1e-6 \
-    actor_rollout_ref.model.use_remove_padding=False \
+    actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.actor.ppo_mini_batch_size=128 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=10 \
     actor_rollout_ref.actor.use_kl_loss=True \
