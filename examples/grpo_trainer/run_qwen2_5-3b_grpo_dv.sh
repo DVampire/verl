@@ -1,23 +1,20 @@
 set -x
 
-export DISK_PATH=datasets_rl
 export VLLM_ATTENTION_BACKEND=XFORMERS
-export HOME=/mnt/$DISK_PATH/wentao.zhang/verl
-export DATASETS=/mnt/$DISK_PATH/wentao.zhang/datasets
-export HUB_PATH=/mnt/$DISK_PATH/wentao.zhang/hub
-export MODEL_PATH=$HUB_PATH/Qwen2.5-7B-Instruct
+export WORKHOME=/AI社交/tongyong/agent_group/wentao.zhang/verl
+export DATASETS=${WORKHOME}/datasets
+export HUB_PATH=${WORKHOME}/../hub
+export MODEL_PATH=${HUB_PATH}/Qwen2.5-3B-Instruct
 export HYDRA_FULL_ERROR=1
 export WANDB_API_KEY=4025943f5c98398d235eae04243f882b45bcd591
 
-python3 ${HOME}/../evaluation-kit/gpu_idle.py &
-
 nnodes=1
-n_gpus_per_node=8
+n_gpus_per_node=4
 total_epochs=50
 tensor_model_parallel_size=2
 project_name='test'
-model_name=$MODEL_PATH
-experiment_name='verl_Qwen2.5-7B-Instruct_GRPO'
+model_name=${MODEL_PATH}
+experiment_name='verl_Qwen2.5-3B-Instruct_GRPO_DV'
 
 
 mm_train_path=$DATASETS/geometry3k/train.parquet
@@ -31,7 +28,7 @@ val_multimodal_parquet_files="['$mm_test_path']"
 val_text_parquet_files="['$gsm8k_test_path']"
 
 python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=grpo \
+    algorithm.adv_estimator=grpo_dv \
     data.train_text_parquet_files="$train_text_parquet_files" \
     data.val_text_parquet_files="$val_text_parquet_files" \
     data.train_batch_size=512 \
@@ -40,7 +37,7 @@ python3 -m verl.trainer.main_ppo \
     data.image_key=images \
     actor_rollout_ref.model.path=$model_name \
     actor_rollout_ref.actor.optim.lr=1e-6 \
-    actor_rollout_ref.model.use_remove_padding=True \
+    actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.actor.ppo_mini_batch_size=128 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=10 \
     actor_rollout_ref.actor.use_kl_loss=True \
