@@ -1,22 +1,19 @@
 set -x
 
-export DISK_PATH=datasets_rl
 export VLLM_ATTENTION_BACKEND=XFORMERS
-export HOME=/mnt/$DISK_PATH/wentao.zhang/verl
-export DATASETS=/mnt/$DISK_PATH/wentao.zhang/datasets
-export HUB_PATH=/mnt/$DISK_PATH/wentao.zhang/hub
-export MODEL_PATH=$HUB_PATH/Qwen2.5-3B-Instruct
+export WORKHOME=/AI社交/tongyong/agent_group/wentao.zhang/verl
+export DATASETS=${WORKHOME}/datasets
+export HUB_PATH=${WORKHOME}/../hub
+export MODEL_PATH=${HUB_PATH}/Qwen2.5-3B-Instruct
 export HYDRA_FULL_ERROR=1
 export WANDB_API_KEY=4025943f5c98398d235eae04243f882b45bcd591
 
-python3 ${HOME}/../evaluation-kit/gpu_idle.py &
-
 nnodes=1
-n_gpus_per_node=8
+n_gpus_per_node=4
 total_epochs=50
 tensor_model_parallel_size=2
 project_name='test'
-model_name=$MODEL_PATH
+model_name=${MODEL_PATH}
 experiment_name='verl_Qwen2.5-3B-Instruct_GRPO'
 
 
