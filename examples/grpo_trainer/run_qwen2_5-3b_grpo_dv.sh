@@ -1,7 +1,7 @@
 set -x
 
 export VLLM_ATTENTION_BACKEND=XFORMERS
-export WORKHOME="/AI社交/tongyong/agent_group/wentao.zhang/verl"
+export WORKHOME="/AI\u793e\u4ea4/tongyong/agent_group/wentao.zhang/verl"
 export DATASETS=${WORKHOME}/datasets
 export HUB_PATH=$(dirname "$WORKHOME")/hub
 export MODEL_PATH=${HUB_PATH}/Qwen2.5-3B-Instruct
