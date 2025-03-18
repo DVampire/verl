@@ -7,7 +7,7 @@ export HYDRA_FULL_ERROR=1
 export WANDB_API_KEY=4025943f5c98398d235eae04243f882b45bcd591
 
 nnodes=1
-n_gpus_per_node=4
+n_gpus_per_node=8
 total_epochs=50
 use_remove_padding=False
 use_hidden_states=True
