@@ -22,7 +22,7 @@ mm_test_path=$DATASETS/geometry3k/test.parquet
 gsm8k_train_path=$DATASETS/gsm8k/train.parquet
 gsm8k_test_path=$DATASETS/gsm8k/test.parquet
 dapomath_train_path=$DATASETS/DAPO-Math-17k/train.parquet
-amie2024_test_path=$DATASETS/AIME-2024/test.parquet
+amie2024_test_path=$DATASETS/AIME-2024/train.parquet
 
 train_multimodal_parquet_files="['$mm_train_path']"
 train_text_parquet_files="['$dapomath_train_path']"
