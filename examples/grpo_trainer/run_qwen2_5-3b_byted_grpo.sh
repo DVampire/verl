@@ -66,6 +66,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.experiment_name=$experiment_name \
     trainer.n_gpus_per_node=$n_gpus_per_node \
     trainer.nnodes=$nnodes \
-    trainer.save_freq=5 \
+    trainer.save_freq=100 \
     trainer.test_freq=5 \
     trainer.total_epochs=$total_epochs $@
