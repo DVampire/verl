@@ -38,6 +38,7 @@ python3 -m verl.trainer.main_ppo \
     data.max_response_length=1024 \
     data.image_key=images \
     data.filter_overlong_prompts=True \
+    data.truncation=left \
     actor_rollout_ref.model.path=$model_name \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=${use_remove_padding} \
