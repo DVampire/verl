@@ -37,7 +37,7 @@ python3 -m verl.trainer.main_ppo \
     data.max_prompt_length=1024 \
     data.max_response_length=1024 \
     data.image_key=images \
-    data.filter_overlong_prompts=True \
+    data.filter_overlong_prompts=False \
     data.truncation=left \
     actor_rollout_ref.model.path=$model_name \
     actor_rollout_ref.actor.optim.lr=1e-6 \
