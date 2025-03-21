@@ -572,7 +572,8 @@ class RayPPOTrainer(object):
                                       max_prompt_length=self.config.data.max_prompt_length,
                                       filter_prompts=True,
                                       return_raw_chat=self.config.data.get('return_raw_chat', False),
-                                      truncation='error')
+                                      truncation=self.config.data.get('truncation', 'error'),
+                                      filter_overlong_prompts=self.config.data.filter_overlong_prompts)
                 if self.config.data.shuffle:
                     sampler = RandomSampler(data_source=dataset)
                 else:
@@ -599,7 +600,8 @@ class RayPPOTrainer(object):
                                        max_prompt_length=self.config.data.max_prompt_length,
                                        filter_prompts=True,
                                        return_raw_chat=self.config.data.get('return_raw_chat', False),
-                                       truncation='error')
+                                       truncation=self.config.data.get('truncation', 'error'),
+                                       filter_overlong_prompts=self.config.data.filter_overlong_prompts)
                 self.val_dataloaders[key] = StatefulDataLoader(dataset=dataset,
                                                                batch_size=len(dataset),
                                                                num_workers=8,
