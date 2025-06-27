@@ -890,6 +890,11 @@ algorithm:
     # Power used for weight scaling in "pow" method
     weight_pow: 2.0
 
+wandb:
+  api_key: null
+  entity: null
+  base_url: null
+
 # config for the trainer
 trainer:
 
