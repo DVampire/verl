@@ -20,7 +20,7 @@ import logging
 import os
 import warnings
 from dataclasses import asdict
-from typing import Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import psutil
 import torch
@@ -107,7 +107,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         if not torch.distributed.is_initialized():
             rank = int(os.environ.get("RANK", 0))
             world_size = int(os.environ.get("WORLD_SIZE", 1))
-            torch.distributed.init_process_group(backend=f"cpu:gloo,{get_device_name()}:{get_nccl_backend()}", rank=rank, world_size=world_size)
+            torch.distributed.init_process_group(backend=f"cpu:gloo,{get_device_name()}:{get_nccl_backend()}", rank=rank, world_size=world_size, init_method=os.environ.get("DIST_INIT_METHOD", None))
 
         # build device mesh for FSDP
         world_size = torch.distributed.get_world_size()
@@ -323,14 +323,14 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 actor_module,
                 cpu_offload=cpu_offload,
                 param_init_fn=init_fn,
-                use_orig_params=False,
                 auto_wrap_policy=auto_wrap_policy,
                 device_id=get_device_id(),
                 sharding_strategy=sharding_strategy,  # zero3
                 mixed_precision=mixed_precision,
                 sync_module_states=True,
                 device_mesh=self.device_mesh,
-                forward_prefetch=self.config.actor.fsdp_config.forward_prefetch,
+                use_orig_params=self.config.actor.fsdp_config.get("use_orig_params", False),
+                forward_prefetch=self.config.actor.fsdp_config.get("forward_prefetch", False),
             )
         elif fsdp_strategy == "fsdp2":
             assert CPUOffloadPolicy is not None, "PyTorch version >= 2.4 is required for using fully_shard API (FSDP2)"
@@ -583,7 +583,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 optimizer=self.actor.actor_optimizer,
                 lr_scheduler=self.actor_lr_scheduler,
                 processing_class=self.processor if self.processor is not None else self.tokenizer,
-                checkpoint_contents=self.config.actor.checkpoint,
+                checkpoint_config=self.config.actor.checkpoint,
             )
 
         if not self._is_actor and self._is_rollout:
@@ -596,7 +596,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 optimizer=None,
                 lr_scheduler=None,
                 processing_class=self.processor if self.processor is not None else self.tokenizer,
-                checkpoint_contents=checkpoint_contents,
+                checkpoint_config=checkpoint_contents,
             )
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
@@ -833,7 +833,7 @@ class CriticWorker(Worker, DistProfilerExtension):
         import torch.distributed
 
         if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend=get_nccl_backend())
+            torch.distributed.init_process_group(backend=get_nccl_backend(), init_method=os.environ.get("DIST_INIT_METHOD", None))
         self.config = config
 
         # build device mesh for Ulysses Sequence Parallel
@@ -1074,7 +1074,7 @@ class CriticWorker(Worker, DistProfilerExtension):
             optimizer=self.critic_optimizer,
             lr_scheduler=self.critic_lr_scheduler,
             processing_class=self.processor if self.processor is not None else self.tokenizer,
-            checkpoint_contents=self.config.checkpoint,
+            checkpoint_config=self.config.checkpoint,
         )
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
@@ -1182,7 +1182,7 @@ class RewardModelWorker(Worker, DistProfilerExtension):
         import torch.distributed
 
         if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend=get_nccl_backend())
+            torch.distributed.init_process_group(backend=get_nccl_backend(), init_method=os.environ.get("DIST_INIT_METHOD", None))
         self.config = config
 
         # build device mesh for Ulysses Sequence Parallel
@@ -1511,6 +1511,11 @@ class AsyncActorRolloutRefWorker(ActorRolloutRefWorker):
     @register(dispatch_mode=Dispatch.DIRECT_ROLLOUT_METHOD, blocking=False)
     async def chat_completion(self, json_request):
         ret = await self.rollout.chat_completion(json_request)
+        return ret
+
+    @register(dispatch_mode=Dispatch.DIRECT_ROLLOUT_METHOD, blocking=False)
+    async def generate(self, prompt_ids: List[int], sampling_params: Dict[str, Any], request_id: str) -> List[int]:
+        ret = await self.rollout.generate(prompt_ids, sampling_params, request_id)
         return ret
 
     @register(dispatch_mode=Dispatch.DIRECT_ROLLOUT_METHOD)
