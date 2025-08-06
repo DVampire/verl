@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-This script is used to merge huggingface model and test verl checkpoints from FSDP and Megatron backends.
+This module is used to merge huggingface model and test verl checkpoints from FSDP and Megatron backends.
 
 To merge FSDP checkpoints:
 ```sh
@@ -31,6 +31,16 @@ python -m verl.model_merger merge \
     --local_dir checkpoints/verl_megatron_gsm8k_examples/qwen2_5_0b5_megatron_saveload/global_step_1/actor \
     --target_dir /path/to/merged_hf_model
 ```
+
+or use distribtued merge for large models like dpskv3 671B
+
+```sh
+torchrun --nproc_per_node 1 --nnodes 8 --node_rank ${RANK} -m verl.model_merger merge\
+    --backend megatron \
+    --local_dir ./checkpoints/global_step_1/actor \
+    --target_dir /path/to/merged_hf_model
+```
+
 
 For more details, please refer to documentation:
 https://verl.readthedocs.io/en/latest/advance/checkpoint.html#convert-fsdp-and-megatron-checkpoints-to-huggingface-format-model

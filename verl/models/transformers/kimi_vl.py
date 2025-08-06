@@ -12,14 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from transformers.cache_utils import Cache
-from transformers.modeling_flash_attention_utils import _flash_attention_forward
+from transformers.modeling_flash_attention_utils import _flash_attention_forward, flash_attn_supports_top_left_mask
 
-from verl.utils.ulysses import gather_heads_scatter_seq, gather_seq_scatter_heads, get_ulysses_sequence_parallel_world_size, validate_ulysses_config
+from verl.models.transformers.monkey_patch import is_transformers_version_in_range
+from verl.utils.ulysses import (
+    gather_heads_scatter_seq,
+    gather_seq_scatter_heads,
+    get_ulysses_sequence_parallel_world_size,
+    validate_ulysses_config,
+)
 
 
 # Copied from transformers.models.llama.modeling_llama.rotate_half
@@ -88,7 +94,7 @@ def _ulysses_flash_attn_forward(
     output_attentions: bool = False,
     use_cache: bool = False,
     **kwargs,
-) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
+) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple[torch.Tensor]]]:
     bsz, q_len, _ = hidden_states.size()
 
     if self.q_lora_rank is None:
@@ -103,7 +109,11 @@ def _ulysses_flash_attn_forward(
     compressed_kv = self.kv_a_proj_with_mqa(hidden_states)
     compressed_kv, k_pe = torch.split(compressed_kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
     k_pe = k_pe.view(bsz, q_len, 1, self.qk_rope_head_dim).transpose(1, 2)
-    kv = self.kv_b_proj(self.kv_a_layernorm(compressed_kv)).view(bsz, q_len, self.num_heads, self.qk_nope_head_dim + self.v_head_dim).transpose(1, 2)
+    kv = (
+        self.kv_b_proj(self.kv_a_layernorm(compressed_kv))
+        .view(bsz, q_len, self.num_heads, self.qk_nope_head_dim + self.v_head_dim)
+        .transpose(1, 2)
+    )
 
     k_nope, value_states = torch.split(kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
 
@@ -141,7 +151,8 @@ def _ulysses_flash_attn_forward(
     if self.q_head_dim != self.v_head_dim:
         value_states = F.pad(value_states, [0, self.q_head_dim - self.v_head_dim])
 
-    # TODO: These transpose are quite inefficient but Flash Attention requires the layout [batch_size, sequence_length, num_heads, head_dim]. We would need to refactor the KV cache
+    # TODO: These transpose are quite inefficient but Flash Attention requires the layout
+    # [batch_size, sequence_length, num_heads, head_dim]. We would need to refactor the KV cache
     # to be able to avoid many of these transpose/reshape/view.
     query_states = query_states.transpose(1, 2)
     key_states = key_states.transpose(1, 2)
@@ -158,7 +169,7 @@ def _ulysses_flash_attn_forward(
         dropout=dropout_rate,
         sliding_window=None,
         is_causal=self.is_causal,
-        use_top_left_mask=self._flash_attn_uses_top_left_mask,
+        use_top_left_mask=flash_attn_supports_top_left_mask(),
         position_ids=position_ids,  # important: pass position ids
         softmax_scale=self.softmax_scale,
     )
@@ -172,4 +183,7 @@ def _ulysses_flash_attn_forward(
     attn_output = attn_output.reshape(bsz, q_len, self.num_heads * self.v_head_dim).contiguous()
     attn_output = self.o_proj(attn_output)
 
-    return attn_output, None, None
+    if is_transformers_version_in_range(min_version="4.53.0"):
+        return attn_output, None
+    else:
+        return attn_output, None, None

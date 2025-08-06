@@ -27,6 +27,23 @@ from verl.utils.distributed import initialize_global_process_group
 from verl.utils.fsdp_utils import MixedPrecisionPolicy, apply_fsdp2
 
 
+def create_random_input_ids(batch_size, seq_len, vocab_size):
+    from flash_attn.bert_padding import unpad_input
+
+    from verl.utils.model import compute_position_id_with_mask, create_random_mask
+
+    input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device="cuda")
+
+    attention_mask = create_random_mask(
+        input_ids, max_ratio_of_left_padding=0.1, min_ratio_of_valid_token=0.5, max_ratio_of_valid_token=0.7
+    )
+    position_ids = compute_position_id_with_mask(attention_mask)
+
+    input_ids = unpad_input(input_ids.unsqueeze(-1), attention_mask)[0].transpose(0, 1)
+    position_ids = unpad_input(position_ids.unsqueeze(-1), attention_mask)[0].transpose(0, 1)
+    return input_ids, position_ids
+
+
 def test_fsdp_ckpt(strategy="fsdp"):
     assert torch.cuda.device_count() >= 2, "need at least 2 gpus for test"
     local_rank, rank, world_size = initialize_global_process_group()
@@ -36,12 +53,16 @@ def test_fsdp_ckpt(strategy="fsdp"):
     config = Qwen2Config(num_hidden_layers=1)
 
     with torch.device("cuda"):
-        model = AutoModelForCausalLM.from_config(config=config, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2")
+        model = AutoModelForCausalLM.from_config(
+            config=config, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2"
+        )
         model = model.to(device="cuda")
 
     # Wrap model with FSDP
     if strategy == "fsdp":
-        mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, reduce_dtype=torch.float32, buffer_dtype=torch.float32)
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32, buffer_dtype=torch.float32
+        )
 
         model = FSDP(
             model,
@@ -52,7 +73,9 @@ def test_fsdp_ckpt(strategy="fsdp"):
             device_mesh=device_mesh,
         )
     else:
-        mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32, cast_forward_inputs=True)
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32, cast_forward_inputs=True
+        )
         fsdp_kwargs = {
             "mesh": device_mesh,
             "mp_policy": mp_policy,
@@ -64,22 +87,22 @@ def test_fsdp_ckpt(strategy="fsdp"):
 
     # Create checkpoint manager
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    checkpoint_manager = FSDPCheckpointManager(model=model, optimizer=optimizer, lr_scheduler=lr_scheduler, tokenizer=tokenizer)
+    checkpoint_manager = FSDPCheckpointManager(
+        model=model, optimizer=optimizer, lr_scheduler=lr_scheduler, tokenizer=tokenizer
+    )
 
     # Generate sample input
-    batch_size = 2
-    seq_len = 32
-    vocab_size = 32000
+    batch_size = 10
+    seq_len = 1024
+    vocab_size = config.vocab_size
     # First input for initial update
-    input_ids1 = torch.randint(0, vocab_size, (batch_size, seq_len), device="cuda")
-    attention_mask1 = torch.ones_like(input_ids1)
+    input_ids1, position_ids1 = create_random_input_ids(batch_size, seq_len, vocab_size)
 
     # Second input for verification
-    input_ids2 = torch.randint(0, vocab_size, (batch_size, seq_len), device="cuda")
-    attention_mask2 = torch.ones_like(input_ids2)
+    input_ids2, position_ids2 = create_random_input_ids(batch_size, seq_len, vocab_size)
 
     # Step 1: Initial update and save checkpoint
-    outputs1 = model(input_ids=input_ids1, attention_mask=attention_mask1)
+    outputs1 = model(input_ids=input_ids1, position_ids=position_ids1)
     loss1 = outputs1.logits.mean()
     loss1.backward()
     optimizer.step()
@@ -90,9 +113,10 @@ def test_fsdp_ckpt(strategy="fsdp"):
     temp_dir = tempfile.mkdtemp()
     checkpoint_path = os.path.join(temp_dir, "checkpoint")
     checkpoint_manager.save_checkpoint(local_path=checkpoint_path, hdfs_path=None, global_step=0)
+    saved_state_dict = model.state_dict()
 
     # Step 2: Second update and forward pass
-    outputs2 = model(input_ids=input_ids2, attention_mask=attention_mask2)
+    outputs2 = model(input_ids=input_ids2, position_ids=position_ids2)
     loss2 = outputs2.logits.mean()
     loss2.backward()
     optimizer.step()
@@ -101,13 +125,17 @@ def test_fsdp_ckpt(strategy="fsdp"):
 
     # Record logits after second update
     with torch.no_grad():
-        logits_before_load = model(input_ids=input_ids2, attention_mask=attention_mask2).logits
+        logits_before_load = model(input_ids=input_ids2, position_ids=position_ids2).logits
 
     # Step 3: Load checkpoint and repeat second update
     checkpoint_manager.load_checkpoint(checkpoint_path)
+    loaded_state_dict = model.state_dict()
+    for key in loaded_state_dict:
+        assert key in saved_state_dict, f"Key {key} not found in saved state dict"
+        torch.testing.assert_close(loaded_state_dict[key], saved_state_dict[key], atol=0.0, rtol=0.0)
 
     # Repeat the second update with same input
-    outputs3 = model(input_ids=input_ids2, attention_mask=attention_mask2)
+    outputs3 = model(input_ids=input_ids2, position_ids=position_ids2)
     loss3 = outputs3.logits.mean()
     loss3.backward()
     optimizer.step()
@@ -116,7 +144,7 @@ def test_fsdp_ckpt(strategy="fsdp"):
 
     # Record logits after loaded checkpoint and update
     with torch.no_grad():
-        logits_after_load = model(input_ids=input_ids2, attention_mask=attention_mask2).logits
+        logits_after_load = model(input_ids=input_ids2, position_ids=position_ids2).logits
 
     # Step 4: Verify outputs match
     torch.testing.assert_close(logits_before_load, logits_after_load, atol=0.0, rtol=0.0)
@@ -130,4 +158,5 @@ def test_fsdp_ckpt(strategy="fsdp"):
 
 if __name__ == "__main__":
     strategy = os.environ.get("STRATEGY", "fsdp")
+    os.environ["FLASH_ATTENTION_DETERMINISTIC"] = "1"
     test_fsdp_ckpt(strategy=strategy)

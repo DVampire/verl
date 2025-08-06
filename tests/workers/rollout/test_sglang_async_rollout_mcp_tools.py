@@ -28,6 +28,7 @@ from utils_sglang import get_rollout_config, prepare_inputs
 
 from verl.protocol import DataProto
 from verl.tools.mcp_search_tool import MCPSearchTool
+from verl.tools.schemas import ToolResponse
 from verl.tools.utils.mcp_clients.McpClientManager import MCPClientManager
 from verl.workers.rollout.schemas import AsyncRolloutRequest, AsyncRolloutRequestStateEnum, Message
 from verl.workers.rollout.sglang_rollout.sglang_rollout import SGLangRollout
@@ -58,7 +59,17 @@ def get_search_messages():
             {
                 "id": "10",
                 "type": "function",
-                "function": {"name": "tavily_search_tool", "arguments": {"what_is_your_intent": "Search for the weather lately", "query": "the weather in Beijing today", "search_depth": "basic", "time_range": "day", "include_domains": ["google.com", "baidu.com"], "max_results": 2}},
+                "function": {
+                    "name": "tavily_search_tool",
+                    "arguments": {
+                        "what_is_your_intent": "Search for the weather lately",
+                        "query": "the weather in Beijing today",
+                        "search_depth": "basic",
+                        "time_range": "day",
+                        "include_domains": ["google.com", "baidu.com"],
+                        "max_results": 2,
+                    },
+                },
             }
         ],
     }
@@ -69,7 +80,17 @@ def get_search_messages():
         "tool_calls": [
             {
                 "type": "function",
-                "function": {"name": "tavily_search_tool", "arguments": {"what_is_your_intent": "Search for the weather lately", "query": "the weather in Beijing tomorrow", "search_depth": "basic", "time_range": "day", "include_domains": ["google.com", "baidu.com"], "max_results": 2}},
+                "function": {
+                    "name": "tavily_search_tool",
+                    "arguments": {
+                        "what_is_your_intent": "Search for the weather lately",
+                        "query": "the weather in Beijing tomorrow",
+                        "search_depth": "basic",
+                        "time_range": "day",
+                        "include_domains": ["google.com", "baidu.com"],
+                        "max_results": 2,
+                    },
+                },
             }
         ],
     }
@@ -81,7 +102,10 @@ def get_search_messages():
 
     # Mock search tool responses
     tool_return_0_msg = {"role": "tool", "content": [{"type": "text", "text": "Today's weather in Beijing is sunny."}]}
-    tool_return_1_msg = {"role": "tool", "content": [{"type": "text", "text": "Tomorrow's weather in Beijing is cloudy."}]}
+    tool_return_1_msg = {
+        "role": "tool",
+        "content": [{"type": "text", "text": "Tomorrow's weather in Beijing is cloudy."}],
+    }
 
     user_prompts = [user_prompt]
     expect_turn_array = [expect_turn_0_msg, expect_turn_1_msg, expect_turn_2_msg]
@@ -109,8 +133,14 @@ class TestRolloutWithMCPSearchTools:
     def search_data(self, qwen_tokenizer):
         user_prompt, expect_turn_array, tool_return_array = get_search_messages()
         prompts = [[message] for message in user_prompt]
-        preencode_turn_array = [qwen_tokenizer.apply_chat_template([turn], tokenize=False, add_generation_prompt=False) for turn in expect_turn_array]
-        preencode_tool_return_array = [qwen_tokenizer.apply_chat_template([turn], tokenize=False, add_generation_prompt=True) for turn in tool_return_array]
+        preencode_turn_array = [
+            qwen_tokenizer.apply_chat_template([turn], tokenize=False, add_generation_prompt=False)
+            for turn in expect_turn_array
+        ]
+        preencode_tool_return_array = [
+            ToolResponse(text=qwen_tokenizer.apply_chat_template([turn], tokenize=False, add_generation_prompt=True))
+            for turn in tool_return_array
+        ]
         return prompts, preencode_turn_array, preencode_tool_return_array
 
     @pytest.fixture
@@ -120,13 +150,18 @@ class TestRolloutWithMCPSearchTools:
         dtype = "bfloat16"
         tensor_parallel_size = 1
         tool_path = "./resource/tool_configs/mcp_tool_config"
-        rollout_config = get_rollout_config(max_response_length, max_prompt_length, dtype, tensor_parallel_size, tool_path)
+        rollout_config = get_rollout_config(
+            max_response_length, max_prompt_length, dtype, tensor_parallel_size, tool_path
+        )
         return rollout_config
 
     @pytest.fixture
     def search_data_proto(self, search_data, qwen_tokenizer):
         preencode_prompts, _, _ = search_data
-        prompts = [qwen_tokenizer.apply_chat_template(message, tokenize=False, add_generation_prompt=True) for message in preencode_prompts]
+        prompts = [
+            qwen_tokenizer.apply_chat_template(message, tokenize=False, add_generation_prompt=True)
+            for message in preencode_prompts
+        ]
         input_ids, attention_mask, position_ids = prepare_inputs(qwen_tokenizer, prompts, 1000)
         prompt_dict = TensorDict(
             {
@@ -149,7 +184,9 @@ class TestRolloutWithMCPSearchTools:
             dtype=object,
         )
         index = np.array([0], dtype=object)
-        prompts = DataProto(batch=prompt_dict, non_tensor_batch={"raw_prompt": messages, "tools_kwargs": tools_kwargs, "index": index})
+        prompts = DataProto(
+            batch=prompt_dict, non_tensor_batch={"raw_prompt": messages, "tools_kwargs": tools_kwargs, "index": index}
+        )
         return prompts
 
     @pytest.fixture
@@ -164,20 +201,61 @@ class TestRolloutWithMCPSearchTools:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "what_is_your_intent": {"type": "string", "description": "Describe your intent for using Tavily"},
+                            "what_is_your_intent": {
+                                "type": "string",
+                                "description": "Describe your intent for using Tavily",
+                            },
                             "query": {"type": "string", "description": "Search query"},
-                            "search_depth": {"type": "string", "description": "The depth of the search ('basic' or 'advanced')"},
-                            "topic": {"type": "string", "description": "The category of the search ('general' or 'news')"},
-                            "days": {"type": "integer", "description": "Number of days back to include in search results (only for 'news' topic)"},
-                            "time_range": {"type": "string", "description": "Time range for results ('day', 'week', 'month', 'year', 'd', 'w', 'm', 'y')"},
-                            "include_domains": {"type": "array", "description": "List of domains to specifically include in search results"},
-                            "exclude_domains": {"type": "array", "description": "List of domains to specifically exclude from search results"},
-                            "include_answer": {"type": "boolean", "description": "Whether to include an answer summary generated by an LLM"},
-                            "include_raw_content": {"type": "boolean", "description": "Whether to include the cleaned and parsed HTML content of each result"},
-                            "include_images": {"type": "boolean", "description": "Whether to include images from search results"},
-                            "include_image_descriptions": {"type": "boolean", "description": "Whether to include descriptions with images"},
-                            "max_results": {"type": "integer", "description": "Maximum number of results to return (5-20)"},
-                            "async_search": {"type": "boolean", "description": "Whether to perform the search asynchronously"},
+                            "search_depth": {
+                                "type": "string",
+                                "description": "The depth of the search ('basic' or 'advanced')",
+                            },
+                            "topic": {
+                                "type": "string",
+                                "description": "The category of the search ('general' or 'news')",
+                            },
+                            "days": {
+                                "type": "integer",
+                                "description": "Number of days back to include in search results (only for "
+                                "'news' topic)",
+                            },
+                            "time_range": {
+                                "type": "string",
+                                "description": "Time range for results ('day', 'week', 'month', 'year', 'd', "
+                                "'w', 'm', 'y')",
+                            },
+                            "include_domains": {
+                                "type": "array",
+                                "description": "List of domains to specifically include in search results",
+                            },
+                            "exclude_domains": {
+                                "type": "array",
+                                "description": "List of domains to specifically exclude from search results",
+                            },
+                            "include_answer": {
+                                "type": "boolean",
+                                "description": "Whether to include an answer summary generated by an LLM",
+                            },
+                            "include_raw_content": {
+                                "type": "boolean",
+                                "description": "Whether to include the cleaned and parsed HTML content of each result",
+                            },
+                            "include_images": {
+                                "type": "boolean",
+                                "description": "Whether to include images from search results",
+                            },
+                            "include_image_descriptions": {
+                                "type": "boolean",
+                                "description": "Whether to include descriptions with images",
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Maximum number of results to return (5-20)",
+                            },
+                            "async_search": {
+                                "type": "boolean",
+                                "description": "Whether to perform the search asynchronously",
+                            },
                         },
                         "required": ["what_is_your_intent", "query"],
                     },
@@ -185,10 +263,18 @@ class TestRolloutWithMCPSearchTools:
                 },
             }
         ]
-        with patch.object(MCPClientManager, "fetch_tool_schemas", return_value=tool_schema), patch.object(SGLangRollout, "_init_distributed_env", return_value=None), patch.object(SGLangRollout, "_init_inference_engine", return_value=None), patch.object(
-            SGLangRollout, "_init_sampling_params", return_value=None
+        with (
+            patch.object(MCPClientManager, "fetch_tool_schemas", return_value=tool_schema),
+            patch.object(SGLangRollout, "_init_distributed_env", return_value=None),
+            patch.object(SGLangRollout, "_init_inference_engine", return_value=None),
+            patch.object(SGLangRollout, "_init_sampling_params", return_value=None),
         ):
-            rollout = SGLangRollout(actor_module="", config=search_rollout_config, processing_class=qwen_tokenizer, model_hf_config=qwen_model_config)
+            rollout = SGLangRollout(
+                actor_module="",
+                config=search_rollout_config,
+                processing_class=qwen_tokenizer,
+                model_hf_config=qwen_model_config,
+            )
             rollout.sampling_params = {
                 "n": 1,
                 "max_new_tokens": search_rollout_config.response_length,
@@ -224,7 +310,19 @@ class TestRolloutWithMCPSearchTools:
         # here we mock a meta info with 'length'. indicate the response is truncate
         mock_rollout._handle_engine_call = MagicMock()
         future = asyncio.Future()
-        future.set_result({"text": expect_turn_array[0], "meta_info": {"id": "d1188d81cba840359df5b352b344bc8e", "finish_reason": {"type": "length", "length": 3000}, "prompt_tokens": 132, "completion_tokens": 100, "cached_tokens": 0, "e2e_latency": 2.23543}})
+        future.set_result(
+            {
+                "text": expect_turn_array[0],
+                "meta_info": {
+                    "id": "d1188d81cba840359df5b352b344bc8e",
+                    "finish_reason": {"type": "length", "length": 3000},
+                    "prompt_tokens": 132,
+                    "completion_tokens": 100,
+                    "cached_tokens": 0,
+                    "e2e_latency": 2.23543,
+                },
+            }
+        )
         mock_rollout._handle_engine_call.return_value = future
         mock_rollout._tp_rank = 0
         loop = asyncio.get_event_loop()
@@ -259,8 +357,20 @@ class TestRolloutWithMCPSearchTools:
 
         mock_rollout._handle_engine_call = MagicMock()
         futures = [asyncio.Future() for i in expect_turn_array]
-        for idx, (i, turn) in enumerate(zip(futures, expect_turn_array)):
-            i.set_result({"text": turn, "meta_info": {"id": "d1188d81cba840359df5b352b344bc8e", "finish_reason": {"type": "tool_calls" if idx < len(expect_turn_array) - 1 else "stop"}, "prompt_tokens": len(turn), "completion_tokens": 100, "cached_tokens": 0, "e2e_latency": 2.23543}})
+        for idx, (i, turn) in enumerate(zip(futures, expect_turn_array, strict=True)):
+            i.set_result(
+                {
+                    "text": turn,
+                    "meta_info": {
+                        "id": "d1188d81cba840359df5b352b344bc8e",
+                        "finish_reason": {"type": "tool_calls" if idx < len(expect_turn_array) - 1 else "stop"},
+                        "prompt_tokens": len(turn),
+                        "completion_tokens": 100,
+                        "cached_tokens": 0,
+                        "e2e_latency": 2.23543,
+                    },
+                }
+            )
             if idx < len(expect_turn_array) - 1:
                 assert mock_rollout._function_call_parser.has_tool_call(turn)
                 assert mock_rollout._function_call_parser.parse_non_stream(turn)
@@ -269,7 +379,9 @@ class TestRolloutWithMCPSearchTools:
         mock_rollout._tp_rank = 0
 
         loop = asyncio.get_event_loop()
-        output_req_list = loop.run_until_complete(asyncio.gather(*[mock_rollout._async_rollout_a_request(req, True, False) for req in req_list]))
+        output_req_list = loop.run_until_complete(
+            asyncio.gather(*[mock_rollout._async_rollout_a_request(req, True, False) for req in req_list])
+        )
 
         # Verify conversation completed successfully with proper tool usage
         output_req = output_req_list[0]
@@ -282,7 +394,7 @@ class TestRolloutWithMCPSearchTools:
         search_counter = 0
         for msg in output_req.messages:
             if msg.role == "tool":
-                assert msg.content == tool_return_array[search_counter]
+                assert msg.content[0]["text"] == tool_return_array[search_counter].text
                 search_counter += 1
         assert search_counter == 2
 
@@ -310,7 +422,7 @@ class TestRolloutWithMCPSearchTools:
             req_list.append(MagicMock(wraps=tmp_req, spec=AsyncRolloutRequest))
 
             futures = [asyncio.Future() for _ in expect_turn_array]
-            for idx, (fut, turn) in enumerate(zip(futures, expect_turn_array)):
+            for idx, (fut, turn) in enumerate(zip(futures, expect_turn_array, strict=True)):
                 fut.set_result(
                     {
                         "text": turn,
@@ -333,7 +445,9 @@ class TestRolloutWithMCPSearchTools:
         with patch.object(SGLangRollout, "_handle_engine_call", new=hacked_handle_engine_call):
             mock_rollout._tp_rank = 0
             loop = asyncio.get_event_loop()
-            output_req_list = loop.run_until_complete(asyncio.gather(*[mock_rollout._async_rollout_a_request(r, True, False) for r in req_list]))
+            output_req_list = loop.run_until_complete(
+                asyncio.gather(*[mock_rollout._async_rollout_a_request(r, True, False) for r in req_list])
+            )
 
         # Verify all requests completed successfully
         assert len(output_req_list) == req_nums
